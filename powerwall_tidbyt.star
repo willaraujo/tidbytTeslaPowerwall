@@ -68,13 +68,14 @@ def main(config):
     grid_status = config.get("grid_status", "on")
     weather_icon = config.get("weather_icon", "clear-day")
 
-    # Determine column 1 icon: solar panel when producing, weather when not
-    if solar_power > 0:
-        col1_icon = build_solar_icon()
-        solar_flow = 1
-    else:
+    # Column 1: daytime = solar panel + weather overlay, nighttime = weather only
+    is_night = config.get("is_night", "false") == "true"
+    if is_night:
         col1_icon = build_weather_icon(weather_icon)
         solar_flow = 0
+    else:
+        col1_icon = build_solar_icon(solar_power, weather_icon)
+        solar_flow = 1 if solar_power > 0 else 0
 
     # Determine grid flow direction
     if grid_power < -10:
@@ -219,12 +220,45 @@ def main(config):
 
 # --- Pixel-art icons ---
 
-def build_solar_icon():
-    """Solar panel pixel art with animated sun, in 20x16 box."""
+def _lerp_color(c1, c2, t):
+    """Interpolate between two hex colors. t=0.0 returns c1, t=1.0 returns c2."""
+    r1 = int(c1[1:3], 16)
+    g1 = int(c1[3:5], 16)
+    b1 = int(c1[5:7], 16)
+    r2 = int(c2[1:3], 16)
+    g2 = int(c2[3:5], 16)
+    b2 = int(c2[5:7], 16)
+    r = int(r1 + (r2 - r1) * t)
+    g = int(g1 + (g2 - g1) * t)
+    b = int(b1 + (b2 - b1) * t)
+    return "#%02x%02x%02x" % (r, g, b)
+
+def build_solar_icon(solar_power = 0, weather_icon = "clear-day"):
+    """Solar panel with dynamic sun + weather overlays, in 20x16 box.
+    Sun brightness scales with solar_power. Weather effects layer on top."""
     panel_color = SOLAR_BLUE
     grid_color = SOLAR_GRID
 
-    # Build panel rows: 3 cols of cells separated by grid lines
+    # Dynamic intensity from solar power (0.0 to 1.0)
+    intensity = min(solar_power / 5000.0, 1.0) if solar_power > 0 else 0.0
+
+    # Weather dims the sun
+    weather_dim = 1.0
+    if weather_icon in ("cloudy", "overcast", "fog"):
+        weather_dim = 0.3
+    elif weather_icon in ("rain", "sleet", "snow"):
+        weather_dim = 0.4
+    elif weather_icon == "partly-cloudy-day":
+        weather_dim = 0.7
+    effective = intensity * weather_dim
+
+    # Dynamic sun colors
+    core_color = _lerp_color("#553300", "#ffcc00", effective)
+    ray_color = _lerp_color("#664400", "#ffaa00", effective)
+    ray_count = int(effective * 8)
+    ray_speed = max(12, 24 - int(effective * 12))
+
+    # Build panel rows
     panel_rows = []
     for row in range(2):
         cell_row = render.Row(children = [
@@ -239,47 +273,177 @@ def build_solar_icon():
         panel_rows.append(cell_row)
         if row == 0:
             panel_rows.append(render.Box(width = 13, height = 1, color = grid_color))
-
     panel = render.Column(children = panel_rows)
 
-    # Animated sun rays (pulse in and out) — 5 rays around 3x3 core
-    sun_rays = animation.Transformation(
-        child = render.Stack(children = [
-            render.Padding(pad = (1, 0, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffaa00")),
-            render.Padding(pad = (3, 0, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffaa00")),
-            render.Padding(pad = (0, 1, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffaa00")),
-            render.Padding(pad = (4, 1, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffaa00")),
-            render.Padding(pad = (0, 3, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffaa00")),
-            render.Padding(pad = (4, 3, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffaa00")),
-            render.Padding(pad = (1, 4, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffaa00")),
-            render.Padding(pad = (3, 4, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffaa00")),
-        ]),
-        duration = 18,
-        delay = 0,
-        direction = "alternate",
-        fill_mode = "forwards",
-        keyframes = [
-            animation.Keyframe(percentage = 0.0, transforms = [animation.Scale(1.0, 1.0)], curve = "ease_in_out"),
-            animation.Keyframe(percentage = 1.0, transforms = [animation.Scale(0.0, 0.0)]),
-        ],
-    )
+    # Build ray pixels (only show ray_count of them)
+    all_ray_pads = [
+        (1, 0), (3, 0), (0, 1), (4, 1), (0, 3), (4, 3), (1, 4), (3, 4),
+    ]
+    ray_children = []
+    for i in range(ray_count):
+        px, py = all_ray_pads[i]
+        ray_children.append(
+            render.Padding(pad = (px, py, 0, 0), child = render.Box(width = 1, height = 1, color = ray_color)),
+        )
 
-    return render.Box(
-        width = 20,
-        height = 16,
-        child = render.Stack(children = [
-            # Sun core (3x3 yellow, top-left corner)
-            render.Padding(pad = (1, 1, 0, 0), child = render.Box(width = 3, height = 3, color = "#ffcc00")),
-            # Sun rays (animated pulse around core)
-            sun_rays,
-            # Panel body starting at y=4 (below sun, aligned with house)
-            render.Padding(pad = (4, 4, 0, 0), child = panel),
-            # Support post
-            render.Padding(pad = (9, 11, 0, 0), child = render.Box(width = 2, height = 2, color = SOLAR_GRAY)),
-            # Base
-            render.Padding(pad = (7, 13, 0, 0), child = render.Box(width = 6, height = 1, color = SOLAR_GRAY)),
-        ]),
+    children = [
+        # Sun core (3x3, dynamic color)
+        render.Padding(pad = (1, 1, 0, 0), child = render.Box(width = 3, height = 3, color = core_color)),
+    ]
+
+    # Add animated rays if any
+    if ray_children:
+        sun_rays = animation.Transformation(
+            child = render.Stack(children = ray_children),
+            duration = ray_speed,
+            delay = 0,
+            direction = "alternate",
+            fill_mode = "forwards",
+            keyframes = [
+                animation.Keyframe(percentage = 0.0, transforms = [animation.Scale(1.0, 1.0)], curve = "ease_in_out"),
+                animation.Keyframe(percentage = 1.0, transforms = [animation.Scale(0.0, 0.0)]),
+            ],
+        )
+        children.append(sun_rays)
+
+    # Panel + structure (always visible)
+    children.append(render.Padding(pad = (4, 4, 0, 0), child = panel))
+    children.append(render.Padding(pad = (9, 11, 0, 0), child = render.Box(width = 2, height = 2, color = SOLAR_GRAY)))
+    children.append(render.Padding(pad = (7, 13, 0, 0), child = render.Box(width = 6, height = 1, color = SOLAR_GRAY)))
+
+    # Layer weather effects on top
+    if "cloud" in weather_icon or weather_icon == "overcast":
+        children.extend(_solar_cloud_overlay(weather_icon))
+    if weather_icon in ("rain", "sleet"):
+        children.extend(_solar_rain_overlay())
+    if weather_icon == "snow":
+        children.extend(_solar_snow_overlay())
+    if weather_icon == "wind":
+        children.extend(_solar_wind_overlay())
+    if weather_icon == "fog":
+        children.extend(_solar_fog_overlay())
+
+    return render.Box(width = 20, height = 16, child = render.Stack(children = children))
+
+def _solar_cloud_overlay(weather_icon):
+    """Drifting cloud(s) over solar panel. More clouds for heavier overcast."""
+    children = []
+    # First cloud — always present for any cloud condition
+    children.append(
+        animation.Transformation(
+            child = render.Padding(pad = (0, 1, 0, 0), child = _cloud_shape(w = 8, h = 2)),
+            duration = 30,
+            delay = 0,
+            direction = "normal",
+            fill_mode = "forwards",
+            keyframes = [
+                animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(-10, 0)], curve = "linear"),
+                animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(22, 0)]),
+            ],
+        ),
     )
+    # Second cloud for full overcast/cloudy
+    if weather_icon in ("cloudy", "overcast"):
+        children.append(
+            animation.Transformation(
+                child = render.Padding(pad = (0, 4, 0, 0), child = _cloud_shape(color = "#444444", w = 6, h = 2)),
+                duration = 24,
+                delay = 12,
+                direction = "normal",
+                fill_mode = "forwards",
+                keyframes = [
+                    animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(-8, 0)], curve = "linear"),
+                    animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(22, 0)]),
+                ],
+            ),
+        )
+    return children
+
+def _solar_rain_overlay():
+    """Rain drops falling over the solar panel area."""
+    drops = []
+    for x, delay in zip([3, 12], [0, 4]):
+        drops.append(
+            render.Padding(
+                pad = (x, 0, 0, 0),
+                child = animation.Transformation(
+                    child = render.Box(width = 1, height = 2, color = RAIN_COLOR),
+                    duration = 12,
+                    delay = delay,
+                    direction = "normal",
+                    fill_mode = "forwards",
+                    keyframes = [
+                        animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(0, -3)], curve = "linear"),
+                        animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(0, 18)]),
+                    ],
+                ),
+            ),
+        )
+    # Cloud at top
+    drops.append(render.Padding(pad = (4, 0, 0, 0), child = _cloud_shape(w = 8, h = 2)))
+    return drops
+
+def _solar_snow_overlay():
+    """Snowflakes drifting over the solar panel area."""
+    flakes = []
+    for x, delay in zip([2, 14], [0, 5]):
+        flakes.append(
+            render.Padding(
+                pad = (x, 0, 0, 0),
+                child = animation.Transformation(
+                    child = render.Box(width = 1, height = 1, color = SNOW_COLOR),
+                    duration = 20,
+                    delay = delay,
+                    direction = "normal",
+                    fill_mode = "forwards",
+                    keyframes = [
+                        animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(0, -2)], curve = "linear"),
+                        animation.Keyframe(percentage = 0.5, transforms = [animation.Translate(2, 8)], curve = "ease_in_out"),
+                        animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(-1, 18)]),
+                    ],
+                ),
+            ),
+        )
+    flakes.append(render.Padding(pad = (4, 0, 0, 0), child = _cloud_shape(w = 8, h = 2)))
+    return flakes
+
+def _solar_wind_overlay():
+    """Wind streaks blowing across the solar area."""
+    streaks = []
+    for y, delay in zip([3, 9], [0, 2]):
+        streaks.append(
+            animation.Transformation(
+                child = render.Padding(pad = (0, y, 0, 0), child = render.Box(width = 4, height = 1, color = WIND_COLOR)),
+                duration = 6,
+                delay = delay,
+                direction = "normal",
+                fill_mode = "forwards",
+                keyframes = [
+                    animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(-5, 0)], curve = "linear"),
+                    animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(22, 0)]),
+                ],
+            ),
+        )
+    return streaks
+
+def _solar_fog_overlay():
+    """Fog haze drifting over the solar area."""
+    haze = []
+    for y, delay in zip([2, 8], [0, 6]):
+        haze.append(
+            animation.Transformation(
+                child = render.Padding(pad = (0, y, 0, 0), child = render.Box(width = 8, height = 2, color = FOG_COLOR)),
+                duration = 25,
+                delay = delay,
+                direction = "alternate",
+                fill_mode = "forwards",
+                keyframes = [
+                    animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(-6, 0)], curve = "ease_in_out"),
+                    animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(14, 0)]),
+                ],
+            ),
+        )
+    return haze
 
 def build_house_icon(seasonal = ""):
     """House pixel art, 16x16. Seasonal decorations built in (same coords as house)."""
@@ -641,6 +805,11 @@ def _build_ghost():
     )
 
 # --- Full overlays (span entire 24x16 col2 area) ---
+# TODO: Rework fireworks
+# - Colors still not right for July 4th
+# - Arcing not visible — rockets should launch from grid side (right)
+#   and solar side (left) and arc across the sky like cannonballs
+# - Need more dramatic parabolic trajectories spanning the full display
 
 def _build_rocket(launch_x, burst_x, burst_y, trail_color, burst_colors, size, delay, duration):
     """One bottle rocket: launches from ground, rises to burst point, explodes.
