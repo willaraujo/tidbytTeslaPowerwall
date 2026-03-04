@@ -116,15 +116,16 @@ def main(config):
     house_icon = build_house_icon(seasonal)
     left_scene = build_left_scene(seasonal)
     right_scene = build_right_scene(seasonal)
-    full_overlay = build_full_overlay(seasonal)
+    bg_overlay, fg_overlay = build_full_overlay(seasonal)
 
     scene_row = render.Row(children = [left_scene, house_icon, right_scene])
-    if full_overlay:
-        house_box = render.Box(width = 24, height = 16, child = render.Stack(
-            children = [scene_row, full_overlay],
-        ))
-    else:
-        house_box = render.Box(width = 24, height = 16, child = scene_row)
+    layers = []
+    if bg_overlay:
+        layers.append(bg_overlay)
+    layers.append(scene_row)
+    if fg_overlay:
+        layers.append(fg_overlay)
+    house_box = render.Box(width = 24, height = 16, child = render.Stack(children = layers))
 
     col2 = render.Column(
         main_align = "space_between",
@@ -405,7 +406,9 @@ def get_seasonal_name(config):
     if seasonal == "" or seasonal == "auto":
         month = int(config.get("month", "0"))
         day = int(config.get("day", "0"))
-        if (month == 12 and day >= 15) or (month == 1 and day <= 5):
+        if (month == 12 and day >= 30) or (month == 1 and day <= 2):
+            seasonal = "newyear"
+        elif (month == 12 and day >= 15) or (month == 1 and day <= 5):
             seasonal = "christmas"
         elif month == 7 and day >= 1 and day <= 7:
             seasonal = "july4"
@@ -435,12 +438,14 @@ def build_right_scene(seasonal):
     return render.Box(width = 4, height = 16)
 
 def build_full_overlay(seasonal):
-    """Full 24x16 overlay for wide animations, or None."""
+    """Full 24x16 overlay. Returns (behind, front) for depth layering."""
     if seasonal == "july4":
-        return _build_firework()
+        return _july4_fireworks()
+    elif seasonal == "newyear":
+        return _newyear_fireworks()
     elif seasonal == "halloween":
-        return _build_bat()
-    return None
+        return (None, _build_bat())
+    return (None, None)
 
 # --- House decorations (use house coordinate system) ---
 
@@ -637,142 +642,115 @@ def _build_ghost():
 
 # --- Full overlays (span entire 24x16 col2 area) ---
 
-def _build_firework():
-    """Big bottle rocket launch with multi-ring colorful burst across 24x16."""
+def _build_burst(x, y, size, colors, delay, duration):
+    """Build one radial burst at (x,y). size='small' (5px +) or 'big' (9px full).
+    Returns list of animated children."""
     children = []
 
-    # Rocket trail (rises from bottom-center to burst point with a spark tail)
-    # Rocket body
-    children.append(
-        animation.Transformation(
-            child = render.Box(width = 1, height = 3, color = "#ffcc00"),
-            duration = 40,
-            delay = 0,
-            direction = "normal",
-            fill_mode = "forwards",
-            keyframes = [
-                animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(11, 16)], curve = "ease_out"),
-                animation.Keyframe(percentage = 0.25, transforms = [animation.Translate(11, 2)]),
-                animation.Keyframe(percentage = 0.3, transforms = [animation.Translate(11, 2), animation.Scale(0.0, 0.0)]),
-                animation.Keyframe(percentage = 1.0, transforms = [animation.Scale(0.0, 0.0)]),
-            ],
-        ),
-    )
+    if size == "small":
+        offsets = [(0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)]
+    else:
+        offsets = [(0, 0), (-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)]
 
-    # Rocket exhaust trail (faint, follows behind)
-    children.append(
-        animation.Transformation(
-            child = render.Box(width = 1, height = 2, color = "#884400"),
-            duration = 40,
-            delay = 0,
-            direction = "normal",
-            fill_mode = "forwards",
-            keyframes = [
-                animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(11, 18)], curve = "ease_out"),
-                animation.Keyframe(percentage = 0.25, transforms = [animation.Translate(11, 5)]),
-                animation.Keyframe(percentage = 0.3, transforms = [animation.Scale(0.0, 0.0)]),
-                animation.Keyframe(percentage = 1.0, transforms = [animation.Scale(0.0, 0.0)]),
-            ],
-        ),
-    )
+    for i, offset in enumerate(offsets):
+        dx, dy = offset[0], offset[1]
+        px = x + dx
+        py = y + dy
 
-    # Flash at burst point (brief bright white)
-    children.append(
-        animation.Transformation(
-            child = render.Padding(
-                pad = (10, 1, 0, 0),
-                child = render.Box(width = 3, height = 3, color = "#ffffff"),
-            ),
-            duration = 40,
-            delay = 0,
-            direction = "normal",
-            fill_mode = "forwards",
-            keyframes = [
-                animation.Keyframe(percentage = 0.0, transforms = [animation.Scale(0.0, 0.0)]),
-                animation.Keyframe(percentage = 0.25, transforms = [animation.Scale(0.0, 0.0)]),
-                animation.Keyframe(percentage = 0.28, transforms = [animation.Scale(1.0, 1.0)]),
-                animation.Keyframe(percentage = 0.35, transforms = [animation.Scale(0.0, 0.0)]),
-                animation.Keyframe(percentage = 1.0, transforms = [animation.Scale(0.0, 0.0)]),
-            ],
-        ),
-    )
+        # Clamp to 24x16 bounds
+        if px < 0 or px > 23 or py < 0 or py > 15:
+            continue
 
-    # Inner ring sparks — 8 directions, tight burst (red/white/blue patriotic)
-    inner_sparks = [
-        (0, -4, "#ff0000"), (0, 4, "#ffffff"), (-4, 0, "#0044ff"), (4, 0, "#ff0000"),
-        (-3, -3, "#ffffff"), (3, -3, "#0044ff"), (-3, 3, "#ff0000"), (3, 3, "#ffffff"),
+        color = colors[i % len(colors)]
+        ripple = i * 1  # stagger each pixel by 1 frame for ripple effect
+
+        if size == "big":
+            # Big burst: appear, hold, drift down 1px, fade
+            children.append(
+                render.Padding(
+                    pad = (px, py, 0, 0),
+                    child = animation.Transformation(
+                        child = render.Box(width = 1, height = 1, color = color),
+                        duration = duration,
+                        delay = delay + ripple,
+                        direction = "normal",
+                        fill_mode = "forwards",
+                        keyframes = [
+                            animation.Keyframe(percentage = 0.0, transforms = [animation.Scale(0.0, 0.0)]),
+                            animation.Keyframe(percentage = 0.05, transforms = [animation.Scale(1.0, 1.0)]),
+                            animation.Keyframe(percentage = 0.5, transforms = [animation.Translate(0, 0), animation.Scale(1.0, 1.0)]),
+                            animation.Keyframe(percentage = 0.8, transforms = [animation.Translate(0, 1), animation.Scale(1.0, 1.0)]),
+                            animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(0, 2), animation.Scale(0.0, 0.0)]),
+                        ],
+                    ),
+                ),
+            )
+        else:
+            # Small burst: appear and fade (no drift)
+            children.append(
+                render.Padding(
+                    pad = (px, py, 0, 0),
+                    child = animation.Transformation(
+                        child = render.Box(width = 1, height = 1, color = color),
+                        duration = duration,
+                        delay = delay + ripple,
+                        direction = "normal",
+                        fill_mode = "forwards",
+                        keyframes = [
+                            animation.Keyframe(percentage = 0.0, transforms = [animation.Scale(0.0, 0.0)]),
+                            animation.Keyframe(percentage = 0.05, transforms = [animation.Scale(1.0, 1.0)]),
+                            animation.Keyframe(percentage = 0.6, transforms = [animation.Scale(1.0, 1.0)]),
+                            animation.Keyframe(percentage = 1.0, transforms = [animation.Scale(0.0, 0.0)]),
+                        ],
+                    ),
+                ),
+            )
+
+    return children
+
+def _build_fireworks(bg_bursts, fg_bursts, duration):
+    """Build layered fireworks. Returns (behind_stack, front_stack) for depth."""
+    bg_children = []
+    for burst in bg_bursts:
+        bg_children.extend(_build_burst(burst[0], burst[1], "small", burst[2], burst[3], duration))
+
+    fg_children = []
+    for burst in fg_bursts:
+        fg_children.extend(_build_burst(burst[0], burst[1], "big", burst[2], burst[3], duration))
+
+    bg = render.Stack(children = bg_children) if bg_children else None
+    fg = render.Stack(children = fg_children) if fg_children else None
+    return (bg, fg)
+
+def _july4_fireworks():
+    """July 4th: warm, rapid volley across the sky."""
+    dim = ["#884400", "#664400", "#886644"]
+    bright = ["#ff4400", "#ffcc00", "#ff8800", "#ffffff"]
+    bg = [
+        (2, 2, dim, 4),
+        (21, 3, dim, 16),
+        (12, 1, dim, 28),
     ]
-    for dx, dy, color in inner_sparks:
-        children.append(
-            render.Padding(
-                pad = (11, 2, 0, 0),
-                child = animation.Transformation(
-                    child = render.Box(width = 1, height = 1, color = color),
-                    duration = 40,
-                    delay = 0,
-                    direction = "normal",
-                    fill_mode = "forwards",
-                    keyframes = [
-                        animation.Keyframe(percentage = 0.0, transforms = [animation.Scale(0.0, 0.0)]),
-                        animation.Keyframe(percentage = 0.28, transforms = [animation.Scale(0.0, 0.0)]),
-                        animation.Keyframe(percentage = 0.35, transforms = [animation.Translate(0, 0), animation.Scale(1.0, 1.0)]),
-                        animation.Keyframe(percentage = 0.7, transforms = [animation.Translate(dx, dy), animation.Scale(1.0, 1.0)]),
-                        animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(dx, dy), animation.Scale(0.0, 0.0)]),
-                    ],
-                ),
-            ),
-        )
-
-    # Outer ring sparks — 8 more, wider spread, staggered timing (gold/red/blue)
-    outer_sparks = [
-        (0, -7, "#ffcc00"), (0, 7, "#ffcc00"), (-6, 0, "#ff4444"), (6, 0, "#ff4444"),
-        (-5, -5, "#4488ff"), (5, -5, "#ffcc00"), (-5, 5, "#4488ff"), (5, 5, "#ff4444"),
+    fg = [
+        (6, 4, bright, 0),
+        (17, 3, bright, 10),
+        (11, 5, bright, 22),
     ]
-    for dx, dy, color in outer_sparks:
-        children.append(
-            render.Padding(
-                pad = (11, 2, 0, 0),
-                child = animation.Transformation(
-                    child = render.Box(width = 1, height = 1, color = color),
-                    duration = 40,
-                    delay = 0,
-                    direction = "normal",
-                    fill_mode = "forwards",
-                    keyframes = [
-                        animation.Keyframe(percentage = 0.0, transforms = [animation.Scale(0.0, 0.0)]),
-                        animation.Keyframe(percentage = 0.30, transforms = [animation.Scale(0.0, 0.0)]),
-                        animation.Keyframe(percentage = 0.40, transforms = [animation.Translate(0, 0), animation.Scale(1.0, 1.0)]),
-                        animation.Keyframe(percentage = 0.8, transforms = [animation.Translate(dx, dy), animation.Scale(1.0, 1.0)]),
-                        animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(dx + (1 if dx > 0 else -1), dy + (1 if dy > 0 else -1)), animation.Scale(0.0, 0.0)]),
-                    ],
-                ),
-            ),
-        )
+    return _build_fireworks(bg, fg, 36)
 
-    # Falling sparkle trails (drip down after burst)
-    drip_positions = [4, 8, 14, 18]
-    drip_colors = ["#ffcc00", "#ff4444", "#ffffff", "#4488ff"]
-    for i, x in enumerate(drip_positions):
-        children.append(
-            render.Padding(
-                pad = (x, 0, 0, 0),
-                child = animation.Transformation(
-                    child = render.Box(width = 1, height = 1, color = drip_colors[i]),
-                    duration = 40,
-                    delay = 0,
-                    direction = "normal",
-                    fill_mode = "forwards",
-                    keyframes = [
-                        animation.Keyframe(percentage = 0.0, transforms = [animation.Scale(0.0, 0.0)]),
-                        animation.Keyframe(percentage = 0.5, transforms = [animation.Translate(0, 3), animation.Scale(0.0, 0.0)]),
-                        animation.Keyframe(percentage = 0.55, transforms = [animation.Translate(0, 3), animation.Scale(1.0, 1.0)]),
-                        animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(0, 14), animation.Scale(0.0, 0.0)]),
-                    ],
-                ),
-            ),
-        )
-
-    return render.Stack(children = children)
+def _newyear_fireworks():
+    """New Year's: elegant gold/silver celebration."""
+    dim = ["#555577", "#446666", "#665588"]
+    bright = ["#ffcc00", "#ffffff", "#cc88ff", "#00cccc"]
+    bg = [
+        (3, 3, dim, 6),
+        (20, 2, dim, 24),
+    ]
+    fg = [
+        (8, 4, bright, 0),
+        (18, 3, bright, 16),
+    ]
+    return _build_fireworks(bg, fg, 40)
 
 def _build_bat():
     """Bat flying across 24x16 area."""
