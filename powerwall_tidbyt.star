@@ -58,6 +58,37 @@ HOUSE_FOUNDATION = "#777777"
 GRID_METAL = "#888888"
 GRID_DARK = "#666666"
 
+# Power thresholds (watts)
+SOLAR_MAX_W = 5000.0       # Solar power at full sun intensity
+LOAD_LOW_W = 2000          # Load below this = green
+LOAD_HIGH_W = 5000         # Load above this = red (between = amber)
+GRID_DEADBAND_W = 10       # Grid power within +/- this = idle (no flow)
+POWER_ZERO_W = 50          # Power below this displays as "0"
+
+# Dynamic colors for power status
+COLOR_GREEN = "#00cc00"
+COLOR_AMBER = "#ffd11a"
+COLOR_RED_WARN = "#ff4400"
+COLOR_RED = "#ff0000"
+COLOR_GRAY = "#666666"
+
+# Sun intensity color endpoints
+SUN_DIM_CORE = "#aa7700"
+SUN_BRIGHT_CORE = "#ffdd00"
+SUN_DIM_RAY = "#996600"
+SUN_BRIGHT_RAY = "#ffbb00"
+
+# Weather dim factors (how much weather reduces sun intensity)
+WEATHER_DIM_HEAVY = 0.3    # cloudy, overcast, fog
+WEATHER_DIM_PRECIP = 0.4   # rain, sleet, snow
+WEATHER_DIM_PARTIAL = 0.7  # partly-cloudy
+
+# Weather condition groups (for matching in multiple places)
+WEATHER_HEAVY = ("cloudy", "overcast", "fog")
+WEATHER_PRECIP = ("rain", "sleet", "snow")
+WEATHER_RAIN = ("rain", "sleet")
+WEATHER_CLOUD_FULL = ("cloudy", "overcast")
+
 def main(config):
     """Render 3-column energy dashboard: Solar/Weather | Home/Battery | Grid.
     Animated energy flow dots show power direction between columns."""
@@ -78,9 +109,9 @@ def main(config):
         solar_flow = 1 if solar_power > 0 else 0
 
     # Determine grid flow direction
-    if grid_power < -10:
+    if grid_power < -GRID_DEADBAND_W:
         grid_flow = 1   # exporting to grid
-    elif grid_power > 10:
+    elif grid_power > GRID_DEADBAND_W:
         grid_flow = -1  # importing from grid
     else:
         grid_flow = 0
@@ -90,7 +121,7 @@ def main(config):
     load_text = format_power(load_power)
     grid_text = format_power(grid_power)
 
-    solar_color = "#00cc00" if solar_power > 0 else "#666666"
+    solar_color = COLOR_GREEN if solar_power > 0 else COLOR_GRAY
 
     # Column 1: Solar / Weather
     col1 = render.Column(
@@ -104,12 +135,12 @@ def main(config):
     )
 
     # Column 2: Home + battery bar (load color = green/amber/red by usage)
-    if load_power < 2000:
-        load_color = "#00cc00"
-    elif load_power < 5000:
-        load_color = "#ffd11a"
+    if load_power < LOAD_LOW_W:
+        load_color = COLOR_GREEN
+    elif load_power < LOAD_HIGH_W:
+        load_color = COLOR_AMBER
     else:
-        load_color = "#ff4400"
+        load_color = COLOR_RED_WARN
 
     # House icon + seasonal scene items in slot-based layout:
     # [4px left scene] [16px house] [4px right scene] = 24px
@@ -141,7 +172,7 @@ def main(config):
     # Column 3: Grid (blinking icon + "OFF" when grid is down)
     grid_down = grid_status.lower() != "on"
     if grid_down:
-        grid_color = "#ff0000"
+        grid_color = COLOR_RED
         grid_text = "OFF"
         grid_icon = animation.Transformation(
             child = build_grid_icon(),
@@ -154,7 +185,7 @@ def main(config):
             ],
         )
     else:
-        grid_color = "#00cc00" if grid_power < -10 else "#ffd11a"
+        grid_color = COLOR_GREEN if grid_power < -GRID_DEADBAND_W else COLOR_AMBER
         grid_icon = build_grid_icon()
 
     col3 = render.Column(
@@ -247,21 +278,21 @@ def build_solar_icon(solar_power = 0, weather_icon = "clear-day"):
     grid_color = SOLAR_GRID
 
     # Dynamic intensity from solar power (0.0 to 1.0)
-    intensity = min(solar_power / 5000.0, 1.0) if solar_power > 0 else 0.0
+    intensity = min(solar_power / SOLAR_MAX_W, 1.0) if solar_power > 0 else 0.0
 
     # Weather dims the sun
     weather_dim = 1.0
-    if weather_icon in ("cloudy", "overcast", "fog"):
-        weather_dim = 0.3
-    elif weather_icon in ("rain", "sleet", "snow"):
-        weather_dim = 0.4
+    if weather_icon in WEATHER_HEAVY:
+        weather_dim = WEATHER_DIM_HEAVY
+    elif weather_icon in WEATHER_PRECIP:
+        weather_dim = WEATHER_DIM_PRECIP
     elif weather_icon == "partly-cloudy-day":
-        weather_dim = 0.7
+        weather_dim = WEATHER_DIM_PARTIAL
     effective = intensity * weather_dim
 
     # Dynamic sun colors — dim amber to bright yellow
-    core_color = _lerp_color("#aa7700", "#ffdd00", effective)
-    ray_color = _lerp_color("#996600", "#ffbb00", effective)
+    core_color = _lerp_color(SUN_DIM_CORE, SUN_BRIGHT_CORE, effective)
+    ray_color = _lerp_color(SUN_DIM_RAY, SUN_BRIGHT_RAY, effective)
     ray_count = int(effective * 8)
     ray_speed = max(40, 80 - int(effective * 40))
 
@@ -321,7 +352,7 @@ def build_solar_icon(solar_power = 0, weather_icon = "clear-day"):
     # Layer weather effects on top
     if "cloud" in weather_icon or weather_icon == "overcast":
         children.extend(_solar_cloud_overlay(weather_icon))
-    if weather_icon in ("rain", "sleet"):
+    if weather_icon in WEATHER_RAIN:
         children.extend(_solar_rain_overlay())
     if weather_icon == "snow":
         children.extend(_solar_snow_overlay())
@@ -350,7 +381,7 @@ def _solar_cloud_overlay(weather_icon):
         ),
     )
     # Second cloud for full overcast/cloudy
-    if weather_icon in ("cloudy", "overcast"):
+    if weather_icon in WEATHER_CLOUD_FULL:
         children.append(
             animation.Transformation(
                 child = render.Padding(pad = (0, 5, 0, 0), child = _cloud_shape(color = "#555555", w = 8, h = 3)),
@@ -978,11 +1009,11 @@ def build_weather_icon(weather_icon):
     """Build a 20x16 weather widget for the solar column when solar=0."""
     if weather_icon == "clear-night":
         return _moon_and_stars()
-    elif weather_icon == "rain" or weather_icon == "sleet":
+    elif weather_icon in WEATHER_RAIN:
         return _rain_icon()
     elif weather_icon == "snow":
         return _snow_icon()
-    elif weather_icon == "cloudy" or weather_icon == "overcast":
+    elif weather_icon in WEATHER_CLOUD_FULL:
         return _cloud_icon()
     elif weather_icon == "partly-cloudy-night":
         return _moon_and_cloud()
@@ -1216,7 +1247,7 @@ def _fog_icon():
 def format_power(watts):
     """Format wattage as compact kW: 0W->'0', 676W->'.7', 1920W->'1.9'"""
     w = abs(watts)
-    if w < 50:
+    if w < POWER_ZERO_W:
         return "0"
     kw = w / 1000.0
     if kw < 0.95:
