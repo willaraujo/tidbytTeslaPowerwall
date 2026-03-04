@@ -202,10 +202,7 @@ def main(config):
         main_align = "space_between",
         cross_align = "center",
         children = [
-            render.Box(width = 20, height = 16, child = render.Row(
-                main_align = "center",
-                children = [grid_icon],
-            )),
+            grid_icon,
             render.Text(content = grid_text, height = 8, font = "tb-8", color = grid_color),
             render.Text(content = "kW" if not grid_down else "", height = 8, font = "tb-8", color = grid_color),
         ],
@@ -231,25 +228,38 @@ def main(config):
     else:
         dots.append(render.Box(width = 10))
 
-    # Main display: fixed-width columns for centering
-    display = render.Stack(
-        children = [
-            render.Row(
-                expanded = True,
-                children = [
-                    render.Box(width = 20, child = col1),
-                    render.Box(width = 24, child = col2),
-                    render.Box(width = 20, child = col3),
-                ],
-            ),
-            render.Column(
-                children = [
-                    render.Box(height = 7),
-                    render.Row(expanded = True, children = dots),
-                ],
-            ),
-        ],
+    # Main display: layered stack with sky background, columns, weather overlay, dots
+    sky_bg = build_sky_background(is_night)
+    weather_overlay = build_weather_overlay(weather_icon, is_night)
+
+    display_children = []
+    if sky_bg:
+        display_children.append(sky_bg)
+
+    display_children.append(
+        render.Row(
+            expanded = True,
+            children = [
+                render.Box(width = 20, child = col1),
+                render.Box(width = 24, child = col2),
+                render.Box(width = 20, child = col3),
+            ],
+        ),
     )
+
+    if weather_overlay:
+        display_children.append(weather_overlay)
+
+    display_children.append(
+        render.Column(
+            children = [
+                render.Box(height = 7),
+                render.Row(expanded = True, children = dots),
+            ],
+        ),
+    )
+
+    display = render.Stack(children = display_children)
 
     return render.Root(
         delay = 200,
@@ -530,11 +540,29 @@ def build_house_icon(seasonal = "", is_night = False):
         render.Padding(pad = (3, 8, 0, 0), child = render.Box(width = 10, height = 6, color = wall_color)),
         # Window (left side)
         render.Padding(pad = (4, 9, 0, 0), child = render.Box(width = 3, height = 3, color = window_color)),
-        # Door (right side)
-        render.Padding(pad = (9, 10, 0, 0), child = render.Box(width = 3, height = 4, color = door_color)),
+        # Interior light behind door (visible when door opens)
+        render.Padding(pad = (9, 10, 0, 0), child = render.Box(width = 3, height = 4, color = "#554411")),
         # Foundation
         render.Padding(pad = (2, 14, 0, 0), child = render.Box(width = 12, height = 1, color = HOUSE_FOUNDATION)),
     ]
+
+    # Animated door that opens and closes
+    children.append(animation.Transformation(
+        child = render.Padding(pad = (9, 10, 0, 0),
+            child = render.Box(width = 3, height = 4, color = door_color)),
+        duration = 120,
+        delay = 0,
+        direction = "normal",
+        fill_mode = "forwards",
+        keyframes = [
+            animation.Keyframe(percentage = 0.0, transforms = [animation.Scale(1.0, 1.0)]),
+            animation.Keyframe(percentage = 0.70, transforms = [animation.Scale(1.0, 1.0)]),
+            animation.Keyframe(percentage = 0.78, transforms = [animation.Scale(0.15, 1.0)]),
+            animation.Keyframe(percentage = 0.88, transforms = [animation.Scale(0.15, 1.0)]),
+            animation.Keyframe(percentage = 0.95, transforms = [animation.Scale(1.0, 1.0)]),
+            animation.Keyframe(percentage = 1.0, transforms = [animation.Scale(1.0, 1.0)]),
+        ],
+    ))
 
     # Night: dim warm interior glow inside window
     if is_night:
@@ -579,6 +607,8 @@ def build_grid_icon():
                 render.Padding(pad = (9, 11, 0, 0), child = render.Box(width = 2, height = 2, color = GRID_METAL)),
                 # Base
                 render.Padding(pad = (8, 13, 0, 0), child = render.Box(width = 4, height = 1, color = GRID_DARK)),
+                # Ground line (matches house foundation)
+                render.Padding(pad = (6, 14, 0, 0), child = render.Box(width = 8, height = 1, color = GRID_DARK)),
             ],
         ),
     )
@@ -1040,25 +1070,13 @@ def _build_bat():
 
 # --- Full-height weather scenes for column 1 (20x32 area) ---
 
-def _elevation_to_y(elevation, is_night, max_y = 24):
-    """Map sun/moon elevation to Y pixel position in 20x32 box.
-    Higher elevation = higher position (lower Y value)."""
+def _elevation_to_y(elevation, is_night, max_y = 8):
+    """Map sun/moon elevation to Y pixel position. Constrained to top area (y=1-8)."""
     if is_night:
         eff = min(abs(elevation), 90.0)
     else:
         eff = min(max(elevation, 0.0), 90.0)
     return int(max_y - (eff / 90.0) * (max_y - 1))
-
-def _night_starfield():
-    """Background twinkling stars for night weather scenes."""
-    return [
-        _twinkling_star(1, 2, 0),
-        _twinkling_star(14, 5, 15),
-        _twinkling_star(6, 10, 8),
-        _twinkling_star(18, 15, 20),
-        _twinkling_star(3, 20, 5),
-        _twinkling_star(16, 26, 12),
-    ]
 
 def _big_crescent(x, y):
     """Large crescent moon pixel art (~8px tall) at given position."""
@@ -1109,22 +1127,21 @@ def _snow_flake(x, delay, duration = 40):
     )
 
 def _clear_night_scene(sun_elevation):
-    """Full-height clear night: large moon + many stars."""
+    """Clear night: moon in top-left corner. Stars come from sky background layer."""
     moon_y = _elevation_to_y(sun_elevation, True)
-    children = _night_starfield()
-    children.extend(_big_crescent(6, moon_y))
+    children = _big_crescent(1, moon_y)
     return render.Stack(children = children)
 
 def _clear_day_scene(sun_elevation):
-    """Full-height clear day without solar panel: sun positioned by elevation."""
+    """Clear day without solar panel: sun in top-left corner."""
     sun_y = _elevation_to_y(sun_elevation, False)
     children = [
-        # Sun core (5x5 with bright center)
-        render.Padding(pad = (7, sun_y, 0, 0), child = render.Box(width = 5, height = 5, color = SUN_DIM_RAY)),
-        render.Padding(pad = (8, sun_y + 1, 0, 0), child = render.Box(width = 3, height = 3, color = SUN_BRIGHT_CORE)),
+        # Sun core (5x5 with bright center), left-aligned
+        render.Padding(pad = (2, sun_y, 0, 0), child = render.Box(width = 5, height = 5, color = SUN_DIM_RAY)),
+        render.Padding(pad = (3, sun_y + 1, 0, 0), child = render.Box(width = 3, height = 3, color = SUN_BRIGHT_CORE)),
     ]
     # Animated rays
-    ray_pads = [(7, sun_y - 1), (12, sun_y - 1), (6, sun_y + 2), (13, sun_y + 2), (7, sun_y + 5), (12, sun_y + 5)]
+    ray_pads = [(2, sun_y - 1), (7, sun_y - 1), (1, sun_y + 2), (8, sun_y + 2), (2, sun_y + 5), (7, sun_y + 5)]
     ray_children = []
     for px, py in ray_pads:
         if py >= 0 and py < 32:
@@ -1143,32 +1160,103 @@ def _clear_day_scene(sun_elevation):
         ))
     return render.Stack(children = children)
 
-def _rain_scene():
-    """Full-height rain: storm cloud + rain drops."""
-    children = [
-        # Storm cloud at top
-        render.Padding(pad = (2, 0, 0, 0), child = _cloud_shape(size = "storm")),
-    ]
-    # Rain drops across full width
-    for x, delay in zip([2, 6, 10, 14, 17], [0, 5, 10, 3, 8]):
-        children.append(_rain_drop(x, delay))
-    return render.Stack(children = children)
+def build_weather_scene(weather_icon, sun_elevation = 0.0, is_night = True):
+    """Build col1 scene: just sun or moon in top-left. Weather effects come from overlay."""
+    if is_night or weather_icon.endswith("-night"):
+        return _clear_night_scene(sun_elevation)
+    return _clear_day_scene(sun_elevation)
 
-def _thunder_scene():
-    """Full-height thunderstorm: storm cloud + lightning bolt + rain."""
+# --- Full-width sky & weather overlay (64x32) ---
+
+def build_sky_background(is_night):
+    """Continuous sky background spanning full 64x32. Night: dark navy + stars."""
+    if not is_night:
+        return None
     children = [
-        # Storm cloud
-        render.Padding(pad = (2, 0, 0, 0), child = _cloud_shape(size = "storm")),
+        # Dark navy sky band across full width (top 16px = sky area above icons)
+        render.Box(width = 64, height = 16, color = "#0a0a1a"),
     ]
-    # Lightning bolt (zigzag pixel art)
+    children.extend(_overlay_stars())
+    return render.Box(width = 64, height = 32, child = render.Stack(children = children))
+
+def _overlay_stars():
+    """Mix of permanent and twinkling stars across full 64px sky."""
+    children = []
+    # Permanent (static) stars — dim dots always visible
+    for x, y in [(4, 2), (19, 5), (30, 1), (43, 4), (55, 2), (62, 6), (12, 8), (37, 10)]:
+        children.append(render.Padding(pad = (x, y, 0, 0),
+            child = render.Box(width = 1, height = 1, color = "#555566")))
+    # Twinkling stars — animated, spread across all columns
+    children.extend([
+        _twinkling_star(8, 1, 0), _twinkling_star(25, 3, 12),
+        _twinkling_star(35, 6, 7), _twinkling_star(48, 1, 18),
+        _twinkling_star(58, 4, 4), _twinkling_star(15, 9, 15),
+        _twinkling_star(42, 8, 22), _twinkling_star(52, 11, 10),
+    ])
+    return children
+
+def build_weather_overlay(weather_icon, is_night):
+    """Full-width weather effects (64x32) that overlay across all columns."""
+    children = []
+    if weather_icon == "thunderstorm":
+        children.extend(_overlay_rain())
+        children.extend(_overlay_lightning())
+    elif weather_icon in WEATHER_RAIN:
+        children.extend(_overlay_rain())
+    elif weather_icon == "snow":
+        children.extend(_overlay_snow())
+    elif weather_icon in WEATHER_CLOUD_FULL:
+        children.extend(_overlay_clouds(3))
+    elif "partly-cloudy" in weather_icon:
+        children.extend(_overlay_clouds(1))
+    elif weather_icon == "wind":
+        children.extend(_overlay_wind())
+    elif weather_icon == "fog":
+        children.extend(_overlay_fog())
+    if not children:
+        return None
+    return render.Box(width = 64, height = 32, child = render.Stack(children = children))
+
+def _overlay_clouds(count):
+    """Clouds drifting across full 64px width."""
+    children = []
+    configs = [
+        ("#3a3a3a", "large", 3, 160, 0),
+        ("#555555", "medium", 8, 130, 40),
+        ("#4a4a4a", "small", 5, 180, 80),
+    ]
+    for i in range(min(count, len(configs))):
+        color, size, y, dur, delay = configs[i]
+        children.append(animation.Transformation(
+            child = render.Padding(pad = (0, y, 0, 0), child = _cloud_shape(color = color, size = size)),
+            duration = dur,
+            delay = delay,
+            direction = "normal",
+            fill_mode = "forwards",
+            keyframes = [
+                animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(-20, 0)], curve = "linear"),
+                animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(80, 0)]),
+            ],
+        ))
+    return children
+
+def _overlay_rain():
+    """Rain drops falling across full 64px width."""
+    children = []
+    for x, delay in zip([3, 10, 18, 25, 33, 40, 48, 55, 62], [0, 5, 10, 3, 8, 13, 2, 7, 11]):
+        children.append(_rain_drop(x, delay))
+    return children
+
+def _overlay_lightning():
+    """Lightning bolt near center (house area) with double-flash."""
     bolt_pixels = [
-        (9, 6), (8, 7), (9, 7), (7, 8), (8, 8), (8, 9), (9, 9), (9, 10), (10, 10),
+        (31, 3), (30, 4), (31, 4), (29, 5), (30, 5), (30, 6), (31, 6), (31, 7), (32, 7),
     ]
     bolt_children = []
     for bx, by in bolt_pixels:
-        bolt_children.append(render.Padding(pad = (bx, by, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffff44")))
-    # Double-flash effect
-    children.append(animation.Transformation(
+        bolt_children.append(render.Padding(pad = (bx, by, 0, 0),
+            child = render.Box(width = 1, height = 1, color = "#ffff44")))
+    children = [animation.Transformation(
         child = render.Stack(children = bolt_children),
         duration = 60,
         delay = 10,
@@ -1182,164 +1270,49 @@ def _thunder_scene():
             animation.Keyframe(percentage = 0.42, transforms = [animation.Scale(0.0, 0.0)]),
             animation.Keyframe(percentage = 1.0, transforms = [animation.Scale(0.0, 0.0)]),
         ],
-    ))
-    # Rain drops
-    for x, delay in zip([3, 9, 15], [0, 6, 12]):
-        children.append(_rain_drop(x, delay, duration = 12))
-    return render.Stack(children = children)
+    )]
+    return children
 
-def _snow_scene():
-    """Full-height snow: light cloud + drifting snowflakes."""
-    children = [
-        # Light cloud at top
-        render.Padding(pad = (4, 0, 0, 0), child = _cloud_shape(color = "#556677", size = "medium")),
-    ]
-    # Snowflakes scattered across
-    for x, delay in zip([1, 5, 9, 13, 17, 3, 15], [0, 8, 16, 4, 12, 20, 28]):
+def _overlay_snow():
+    """Snowflakes drifting across full 64px width."""
+    children = []
+    for x, delay in zip([2, 8, 15, 22, 30, 37, 44, 51, 58, 5, 35, 48], [0, 8, 16, 4, 12, 20, 28, 6, 14, 24, 10, 18]):
         children.append(_snow_flake(x, delay))
-    return render.Stack(children = children)
+    return children
 
-def _cloudy_scene():
-    """Full-height cloudy: 3 cloud layers drifting at different speeds."""
+def _overlay_wind():
+    """Wind streaks spanning full 64px width."""
     children = []
-    # Large dark cloud drifting right
-    children.append(animation.Transformation(
-        child = render.Padding(pad = (0, 3, 0, 0), child = _cloud_shape(color = "#3a3a3a", size = "large")),
-        duration = 60,
-        delay = 0,
-        direction = "normal",
-        fill_mode = "forwards",
-        keyframes = [
-            animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(-18, 0)], curve = "linear"),
-            animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(24, 0)]),
-        ],
-    ))
-    # Medium lighter cloud drifting left
-    children.append(animation.Transformation(
-        child = render.Padding(pad = (0, 14, 0, 0), child = _cloud_shape(color = "#555555", size = "medium")),
-        duration = 45,
-        delay = 15,
-        direction = "normal",
-        fill_mode = "forwards",
-        keyframes = [
-            animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(24, 0)], curve = "linear"),
-            animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(-16, 0)]),
-        ],
-    ))
-    # Small wispy cloud drifting right
-    children.append(animation.Transformation(
-        child = render.Padding(pad = (0, 22, 0, 0), child = _cloud_shape(color = "#4a4a4a", size = "small")),
-        duration = 70,
-        delay = 25,
-        direction = "normal",
-        fill_mode = "forwards",
-        keyframes = [
-            animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(-12, 0)], curve = "linear"),
-            animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(24, 0)]),
-        ],
-    ))
-    return render.Stack(children = children)
-
-def _partly_cloudy_night_scene(sun_elevation):
-    """Full-height partly cloudy night: moon + drifting cloud + stars."""
-    moon_y = _elevation_to_y(sun_elevation, True)
-    children = _night_starfield()
-    children.extend(_big_crescent(6, moon_y))
-    # Drifting cloud that periodically covers moon
-    children.append(animation.Transformation(
-        child = render.Padding(pad = (0, max(0, moon_y - 2), 0, 0), child = _cloud_shape(color = "#444444", size = "medium")),
-        duration = 50,
-        delay = 0,
-        direction = "normal",
-        fill_mode = "forwards",
-        keyframes = [
-            animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(-14, 0)], curve = "linear"),
-            animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(24, 0)]),
-        ],
-    ))
-    return render.Stack(children = children)
-
-def _partly_cloudy_day_scene(sun_elevation):
-    """Full-height partly cloudy day: sun + drifting cloud."""
-    sun_y = _elevation_to_y(sun_elevation, False)
-    children = [
-        render.Padding(pad = (7, sun_y, 0, 0), child = render.Box(width = 5, height = 5, color = SUN_DIM_RAY)),
-        render.Padding(pad = (8, sun_y + 1, 0, 0), child = render.Box(width = 3, height = 3, color = SUN_BRIGHT_CORE)),
-    ]
-    # Cloud drifting across
-    children.append(animation.Transformation(
-        child = render.Padding(pad = (0, max(0, sun_y - 1), 0, 0), child = _cloud_shape(size = "medium")),
-        duration = 55,
-        delay = 0,
-        direction = "normal",
-        fill_mode = "forwards",
-        keyframes = [
-            animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(-14, 0)], curve = "linear"),
-            animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(24, 0)]),
-        ],
-    ))
-    return render.Stack(children = children)
-
-def _wind_scene():
-    """Full-height wind: horizontal streaks across full column."""
-    children = []
-    for y, delay, w in zip([4, 11, 18, 25], [0, 3, 6, 2], [5, 4, 6, 3]):
+    for y, delay, w in zip([3, 8, 14, 20, 26], [0, 4, 8, 2, 6], [8, 6, 10, 7, 5]):
         children.append(animation.Transformation(
             child = render.Padding(pad = (0, y, 0, 0), child = render.Box(width = w, height = 1, color = WIND_COLOR)),
-            duration = 8,
+            duration = 25,
             delay = delay,
             direction = "normal",
             fill_mode = "forwards",
             keyframes = [
-                animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(-6, 0)], curve = "linear"),
-                animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(22, 0)]),
+                animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(-10, 0)], curve = "linear"),
+                animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(70, 0)]),
             ],
         ))
-    return render.Stack(children = children)
+    return children
 
-def _fog_scene():
-    """Full-height fog: layered haze bands oscillating."""
+def _overlay_fog():
+    """Fog bands oscillating across full 64px width."""
     children = []
-    for y, delay, gray in zip([3, 10, 17, 24], [0, 8, 16, 4], ["#444444", "#333333", "#3a3a3a", "#383838"]):
+    for y, delay, gray in zip([3, 9, 16, 22, 28], [0, 10, 20, 5, 15], ["#444444", "#333333", "#3a3a3a", "#383838", "#404040"]):
         children.append(animation.Transformation(
-            child = render.Padding(pad = (0, y, 0, 0), child = render.Box(width = 14, height = 2, color = gray)),
-            duration = 70,
+            child = render.Padding(pad = (0, y, 0, 0), child = render.Box(width = 30, height = 2, color = gray)),
+            duration = 140,
             delay = delay,
             direction = "alternate",
             fill_mode = "forwards",
             keyframes = [
-                animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(-8, 0)], curve = "ease_in_out"),
-                animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(14, 0)]),
+                animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(-20, 0)], curve = "ease_in_out"),
+                animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(40, 0)]),
             ],
         ))
-    return render.Stack(children = children)
-
-def build_weather_scene(weather_icon, sun_elevation = 0.0, is_night = True):
-    """Build a 20x32 full-height weather scene for col1 when panel is gone."""
-    if weather_icon == "clear-night":
-        return _clear_night_scene(sun_elevation)
-    elif weather_icon == "clear-day":
-        return _clear_day_scene(sun_elevation)
-    elif weather_icon == "thunderstorm":
-        return _thunder_scene()
-    elif weather_icon in WEATHER_RAIN:
-        return _rain_scene()
-    elif weather_icon == "snow":
-        return _snow_scene()
-    elif weather_icon in WEATHER_CLOUD_FULL:
-        return _cloudy_scene()
-    elif weather_icon == "partly-cloudy-night":
-        return _partly_cloudy_night_scene(sun_elevation)
-    elif weather_icon == "partly-cloudy-day":
-        return _partly_cloudy_day_scene(sun_elevation)
-    elif weather_icon == "wind":
-        return _wind_scene()
-    elif weather_icon == "fog":
-        return _fog_scene()
-    # Default fallback
-    if is_night:
-        return _clear_night_scene(sun_elevation)
-    return _clear_day_scene(sun_elevation)
+    return children
 
 def _twinkling_star(x, y, delay):
     """Single 1px star that fades in/out at the given position."""
