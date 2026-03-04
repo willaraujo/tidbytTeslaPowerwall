@@ -9,29 +9,6 @@ load("encoding/base64.star", "base64")
 load("render.star", "render")
 load("animation.star", "animation")
 
-# Icons (base64-encoded PNGs)
-SOLAR_PANEL = base64.decode(
-    "iVBORw0KGgoAAAANSUhEUgAAABUAAAAQCAYAAAD52jQlAAAArElEQVQ4ja2T2xGFIAxETxyrcOhM" +
-    "y7M0xzb2fjA4kYcPrvsFCSzhBExCZDLDAHwuxZ5ovEq+MfIaWkYSqt3ikdLmlkG38dcmx1U9v2h8" +
-    "721mVeaNRgkwpjCzbytTWABO43i4VDMe44lYqlaS4sb5ttKWiu5faQoL+7ae5pLKd+4ntQVPlCMo" +
-    "mHpmOcNWLGc7+ES+uFevmELJNcU8ugG+rRKOx9/XoKph40P8rR8wcGBXI4UlEQAAAABJRU5ErkJg" +
-    "gg=="
-)
-
-GRID = base64.decode(
-    "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAt0lEQVQ4jYWQuxEDIQxEhcfFeIZm" +
-    "HEEtTimHTmiBa4KYZC+xGKEToITR5+0KEYkAADIi54ycM6z+2wIkSEQUQnArg4cAQxJk+LouAgDn" +
-    "nNPcULdcaq2Q/VrrPNN7BwDI1zIopTzvwMN6Ay2y2/A4oGsyf5lqiyil7N13OcPmHU4DMk/Rj/7v" +
-    "+8E0wCJaoLWGFD1S9OB8wKcNJMiuE7z6swanlXcwg7puwlJAO8pDLWG5rlXfgv+4AXBeHhx5xCS7" +
-    "AAAAAElFTkSuQmCC"
-)
-
-HOUSE = base64.decode(
-    "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAb0lEQVQ4jcWQQQrAMAgE19KX9dL/" +
-    "v2h7arDRFT1VCIHEGVYBUbxu+ntUCybnkgBPJDu83jsSBbckGUyC7yklOnYUaEkSWwlcPwHQPGxm" +
-    "ls2fJQj9anmVAADOTlOVLhXsQJXuUB/d+l/w2UE1q/p7AIUnlBV3qmXkAAAAAElFTkSuQmCC"
-)
-
 # Animated energy flow dots (GIF)
 DOTS_LTR = base64.decode(
     "R0lGODlhCgAFAIEAAP/RGwAAAAAAAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQJCgABACwAAAAA" +
@@ -54,7 +31,7 @@ MOON_COLOR = "#CCCC88"
 WIND_COLOR = "#667788"
 FOG_COLOR = "#333333"
 
-# Battery bar gradient colors (8 segments, red → green)
+# Battery bar gradient colors (8 segments, red -> green)
 BATT_GRADIENT = [
     "#ff0000",
     "#ff4400",
@@ -68,6 +45,19 @@ BATT_GRADIENT = [
 BATT_OUTLINE = "#555555"
 BATT_EMPTY = "#111111"
 
+# Icon colors
+SOLAR_BLUE = "#1a3a5c"
+SOLAR_GRID = "#3388cc"
+SOLAR_GRAY = "#888888"
+HOUSE_ROOF = "#cc4444"
+HOUSE_WALL = "#ddaa55"
+HOUSE_WINDOW = "#66ccff"
+HOUSE_DOOR = "#885522"
+HOUSE_CHIMNEY = "#aa6633"
+HOUSE_FOUNDATION = "#777777"
+GRID_METAL = "#888888"
+GRID_DARK = "#666666"
+
 def main(config):
     """Render 3-column energy dashboard: Solar/Weather | Home/Battery | Grid.
     Animated energy flow dots show power direction between columns."""
@@ -80,7 +70,7 @@ def main(config):
 
     # Determine column 1 icon: solar panel when producing, weather when not
     if solar_power > 0:
-        col1_icon = render.Image(src = SOLAR_PANEL)
+        col1_icon = build_solar_icon()
         solar_flow = 1
     else:
         col1_icon = build_weather_icon(weather_icon)
@@ -120,13 +110,19 @@ def main(config):
     else:
         load_color = "#ff4400"
 
+    # House icon with optional seasonal overlay
+    house_icon = build_house_icon()
+    seasonal = get_seasonal_overlay(config)
+    if seasonal:
+        house_icon = render.Stack(children = [house_icon, seasonal])
+
     col2 = render.Column(
         main_align = "space_between",
         cross_align = "center",
         children = [
             render.Box(width = 24, height = 16, child = render.Row(
                 main_align = "center",
-                children = [render.Image(src = HOUSE)],
+                children = [house_icon],
             )),
             render.Text(content = load_text, height = 8, font = "tb-8", color = load_color),
             render.Box(height = 8, child = build_battery_bar(battery_pct)),
@@ -139,7 +135,7 @@ def main(config):
         grid_color = "#ff0000"
         grid_text = "OFF"
         grid_icon = animation.Transformation(
-            child = render.Image(src = GRID),
+            child = build_grid_icon(),
             duration = 10,
             direction = "alternate",
             fill_mode = "forwards",
@@ -150,7 +146,7 @@ def main(config):
         )
     else:
         grid_color = "#00cc00" if grid_power < -10 else "#ffd11a"
-        grid_icon = render.Image(src = GRID)
+        grid_icon = build_grid_icon()
 
     col3 = render.Column(
         main_align = "space_between",
@@ -198,7 +194,7 @@ def main(config):
             ),
             render.Column(
                 children = [
-                    render.Box(height = 16),
+                    render.Box(height = 7),
                     render.Row(expanded = True, children = dots),
                 ],
             ),
@@ -213,7 +209,124 @@ def main(config):
         ),
     )
 
-# --- Battery bar (outlined battery icon with gradient segments) ---
+# --- Pixel-art icons ---
+
+def build_solar_icon():
+    """Solar panel pixel art, 14x12, centered in 20x16 box."""
+    # Panel body: 12x7 with grid lines
+    panel_color = SOLAR_BLUE
+    grid_color = SOLAR_GRID
+
+    # Build panel rows: 3 cols of cells separated by grid lines
+    # Each cell is 3px wide, grid lines are 1px, total = 3+1+3+1+3 = 11px inner
+    # With 1px border each side = 13px
+    panel_rows = []
+    for row in range(2):
+        # Cell row (3px tall)
+        cell_row = render.Row(children = [
+            render.Box(width = 1, height = 3, color = grid_color),
+            render.Box(width = 3, height = 3, color = panel_color),
+            render.Box(width = 1, height = 3, color = grid_color),
+            render.Box(width = 3, height = 3, color = panel_color),
+            render.Box(width = 1, height = 3, color = grid_color),
+            render.Box(width = 3, height = 3, color = panel_color),
+            render.Box(width = 1, height = 3, color = grid_color),
+        ])
+        panel_rows.append(cell_row)
+        if row == 0:
+            # Horizontal grid line between rows
+            panel_rows.append(render.Box(width = 13, height = 1, color = grid_color))
+
+    panel = render.Column(children = panel_rows)
+
+    # Support post and base
+    post = render.Row(
+        main_align = "center",
+        children = [render.Box(width = 2, height = 2, color = SOLAR_GRAY)],
+    )
+    base = render.Row(
+        main_align = "center",
+        children = [render.Box(width = 6, height = 1, color = SOLAR_GRAY)],
+    )
+
+    icon = render.Column(
+        cross_align = "center",
+        children = [panel, post, base],
+    )
+
+    return render.Box(
+        width = 20,
+        height = 16,
+        child = render.Row(
+            main_align = "center",
+            cross_align = "center",
+            children = [icon],
+        ),
+    )
+
+def build_house_icon():
+    """House pixel art, 16x14, centered in 16x16 area."""
+    return render.Box(
+        width = 16,
+        height = 16,
+        child = render.Stack(
+            children = [
+                # Chimney (right side)
+                render.Padding(pad = (12, 0, 0, 0), child = render.Box(width = 2, height = 4, color = HOUSE_CHIMNEY)),
+                # Roof - wide triangle shape
+                render.Padding(pad = (6, 3, 0, 0), child = render.Box(width = 4, height = 1, color = HOUSE_ROOF)),
+                render.Padding(pad = (5, 4, 0, 0), child = render.Box(width = 6, height = 1, color = HOUSE_ROOF)),
+                render.Padding(pad = (4, 5, 0, 0), child = render.Box(width = 8, height = 1, color = HOUSE_ROOF)),
+                render.Padding(pad = (3, 6, 0, 0), child = render.Box(width = 10, height = 1, color = HOUSE_ROOF)),
+                render.Padding(pad = (2, 7, 0, 0), child = render.Box(width = 12, height = 1, color = HOUSE_ROOF)),
+                # Walls
+                render.Padding(pad = (3, 8, 0, 0), child = render.Box(width = 10, height = 6, color = HOUSE_WALL)),
+                # Window (left side, light blue glow)
+                render.Padding(pad = (4, 9, 0, 0), child = render.Box(width = 3, height = 3, color = HOUSE_WINDOW)),
+                # Door (right side)
+                render.Padding(pad = (9, 10, 0, 0), child = render.Box(width = 3, height = 4, color = HOUSE_DOOR)),
+                # Foundation
+                render.Padding(pad = (2, 14, 0, 0), child = render.Box(width = 12, height = 1, color = HOUSE_FOUNDATION)),
+            ],
+        ),
+    )
+
+def build_grid_icon():
+    """Power pylon pixel art, 14x14, centered in 20x16 box."""
+    return render.Box(
+        width = 20,
+        height = 16,
+        child = render.Stack(
+            children = [
+                # Top cap
+                render.Padding(pad = (9, 1, 0, 0), child = render.Box(width = 2, height = 1, color = GRID_METAL)),
+                # Upper cross arm
+                render.Padding(pad = (6, 2, 0, 0), child = render.Box(width = 8, height = 1, color = GRID_METAL)),
+                # Wire attachment points
+                render.Padding(pad = (5, 3, 0, 0), child = render.Box(width = 1, height = 1, color = GRID_DARK)),
+                render.Padding(pad = (9, 3, 0, 0), child = render.Box(width = 2, height = 1, color = GRID_METAL)),
+                render.Padding(pad = (14, 3, 0, 0), child = render.Box(width = 1, height = 1, color = GRID_DARK)),
+                # Upper taper
+                render.Padding(pad = (8, 4, 0, 0), child = render.Box(width = 4, height = 1, color = GRID_METAL)),
+                render.Padding(pad = (9, 5, 0, 0), child = render.Box(width = 2, height = 1, color = GRID_METAL)),
+                # Center post
+                render.Padding(pad = (9, 6, 0, 0), child = render.Box(width = 2, height = 2, color = GRID_METAL)),
+                # Lower cross arm
+                render.Padding(pad = (7, 8, 0, 0), child = render.Box(width = 6, height = 1, color = GRID_METAL)),
+                # Lower wire points
+                render.Padding(pad = (6, 9, 0, 0), child = render.Box(width = 1, height = 1, color = GRID_DARK)),
+                render.Padding(pad = (9, 9, 0, 0), child = render.Box(width = 2, height = 1, color = GRID_METAL)),
+                render.Padding(pad = (13, 9, 0, 0), child = render.Box(width = 1, height = 1, color = GRID_DARK)),
+                # Lower taper
+                render.Padding(pad = (8, 10, 0, 0), child = render.Box(width = 4, height = 1, color = GRID_METAL)),
+                render.Padding(pad = (9, 11, 0, 0), child = render.Box(width = 2, height = 2, color = GRID_METAL)),
+                # Base
+                render.Padding(pad = (8, 13, 0, 0), child = render.Box(width = 4, height = 1, color = GRID_DARK)),
+            ],
+        ),
+    )
+
+# --- Battery bar ---
 
 def build_battery_bar(battery_pct):
     """Build a battery icon with gradient segments and percentage text beside it."""
@@ -258,6 +371,154 @@ def build_battery_bar(battery_pct):
                 pad = (1, 0, 0, 0),
                 child = render.Text(content = pct_text, font = "tom-thumb", color = "#ffffff"),
             ),
+        ],
+    )
+
+# --- Seasonal easter eggs ---
+
+def get_seasonal_overlay(config):
+    """Return seasonal decoration overlay or None.
+    Server sends 'seasonal' config: 'christmas', 'july4', 'halloween',
+    'thanksgiving', or 'auto' (use month/day). Send any value to test."""
+    seasonal = config.get("seasonal", "")
+
+    if seasonal == "" or seasonal == "auto":
+        month = int(config.get("month", "0"))
+        day = int(config.get("day", "0"))
+        if (month == 12 and day >= 15) or (month == 1 and day <= 5):
+            seasonal = "christmas"
+        elif month == 7 and day >= 1 and day <= 7:
+            seasonal = "july4"
+        elif month == 10 and day >= 25 and day <= 31:
+            seasonal = "halloween"
+        elif month == 11 and day >= 20 and day <= 30:
+            seasonal = "thanksgiving"
+
+    if seasonal == "christmas":
+        return _christmas_overlay()
+    elif seasonal == "july4":
+        return _firework_overlay()
+    elif seasonal == "halloween":
+        return _halloween_overlay()
+    elif seasonal == "thanksgiving":
+        return _thanksgiving_overlay()
+    return None
+
+def _christmas_overlay():
+    """Snowman next to house + snow on roof."""
+    return render.Stack(
+        children = [
+            # Snow on roof (white dots)
+            render.Padding(pad = (5, 3, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffffff")),
+            render.Padding(pad = (7, 2, 0, 0), child = render.Box(width = 2, height = 1, color = "#ffffff")),
+            render.Padding(pad = (10, 3, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffffff")),
+            # Snowman (right side of house area)
+            # Bottom ball
+            render.Padding(pad = (0, 12, 0, 0), child = render.Box(width = 3, height = 3, color = "#ffffff")),
+            # Top ball
+            render.Padding(pad = (0, 10, 0, 0), child = render.Box(width = 3, height = 2, color = "#ffffff")),
+            # Eyes
+            render.Padding(pad = (0, 10, 0, 0), child = render.Box(width = 1, height = 1, color = "#000000")),
+            render.Padding(pad = (2, 10, 0, 0), child = render.Box(width = 1, height = 1, color = "#000000")),
+            # Carrot nose
+            render.Padding(pad = (1, 11, 0, 0), child = render.Box(width = 1, height = 1, color = "#ff8800")),
+        ],
+    )
+
+def _firework_overlay():
+    """Bottle rocket launch with colorful burst."""
+    firework_colors = ["#ffcc00", "#ff44ff", "#00ffcc", "#ff8800", "#88ff00"]
+
+    children = []
+
+    # Rocket launch (1px rising from bottom to top)
+    children.append(
+        animation.Transformation(
+            child = render.Box(width = 1, height = 2, color = "#ffcc00"),
+            duration = 30,
+            delay = 5,
+            direction = "normal",
+            fill_mode = "forwards",
+            keyframes = [
+                animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(1, 14)], curve = "ease_out"),
+                animation.Keyframe(percentage = 0.4, transforms = [animation.Translate(0, 0)]),
+                animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(0, 0), animation.Scale(0.0, 0.0)]),
+            ],
+        ),
+    )
+
+    # Burst sparks (appear at top after rocket arrives)
+    spark_positions = [(-2, -1), (2, -1), (-1, -2), (1, -2), (0, -3), (-3, 0), (3, 0)]
+    for i, pos in enumerate(spark_positions):
+        color = firework_colors[i % len(firework_colors)]
+        children.append(
+            render.Padding(
+                pad = (1, 0, 0, 0),
+                child = animation.Transformation(
+                    child = render.Box(width = 1, height = 1, color = color),
+                    duration = 30,
+                    delay = 5,
+                    direction = "normal",
+                    fill_mode = "forwards",
+                    keyframes = [
+                        animation.Keyframe(percentage = 0.0, transforms = [animation.Scale(0.0, 0.0)]),
+                        animation.Keyframe(percentage = 0.4, transforms = [animation.Scale(0.0, 0.0)]),
+                        animation.Keyframe(percentage = 0.5, transforms = [animation.Translate(0, 0), animation.Scale(1.0, 1.0)]),
+                        animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(pos[0], pos[1]), animation.Scale(0.0, 0.0)]),
+                    ],
+                ),
+            ),
+        )
+
+    return render.Stack(children = children)
+
+def _halloween_overlay():
+    """Pumpkin next to house + bat flying above."""
+    return render.Stack(
+        children = [
+            # Pumpkin body (orange)
+            render.Padding(pad = (0, 12, 0, 0), child = render.Box(width = 3, height = 3, color = "#ff8800")),
+            # Pumpkin stem (green)
+            render.Padding(pad = (1, 11, 0, 0), child = render.Box(width = 1, height = 1, color = "#44aa00")),
+            # Pumpkin eyes (dark)
+            render.Padding(pad = (0, 13, 0, 0), child = render.Box(width = 1, height = 1, color = "#000000")),
+            render.Padding(pad = (2, 13, 0, 0), child = render.Box(width = 1, height = 1, color = "#000000")),
+            # Bat flying above (oscillating)
+            animation.Transformation(
+                child = render.Padding(
+                    pad = (0, 2, 0, 0),
+                    child = render.Row(children = [
+                        render.Box(width = 2, height = 1, color = "#222222"),
+                        render.Box(width = 1, height = 1, color = "#333333"),
+                        render.Box(width = 2, height = 1, color = "#222222"),
+                    ]),
+                ),
+                duration = 20,
+                delay = 0,
+                direction = "alternate",
+                fill_mode = "forwards",
+                keyframes = [
+                    animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(-2, 0)], curve = "ease_in_out"),
+                    animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(12, 0)]),
+                ],
+            ),
+        ],
+    )
+
+def _thanksgiving_overlay():
+    """Turkey next to house."""
+    return render.Stack(
+        children = [
+            # Tail feathers (fan shape, fall colors)
+            render.Padding(pad = (0, 10, 0, 0), child = render.Box(width = 1, height = 1, color = "#dd6600")),
+            render.Padding(pad = (1, 9, 0, 0), child = render.Box(width = 1, height = 2, color = "#ddaa00")),
+            render.Padding(pad = (2, 10, 0, 0), child = render.Box(width = 1, height = 1, color = "#cc3300")),
+            # Body (brown)
+            render.Padding(pad = (0, 11, 0, 0), child = render.Box(width = 3, height = 3, color = "#884422")),
+            # Head (extends right)
+            render.Padding(pad = (3, 11, 0, 0), child = render.Box(width = 1, height = 1, color = "#884422")),
+            # Red wattle
+            render.Padding(pad = (3, 12, 0, 0), child = render.Box(width = 1, height = 1, color = "#cc0000")),
         ],
     )
 
