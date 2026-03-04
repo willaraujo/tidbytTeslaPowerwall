@@ -638,45 +638,135 @@ def _build_ghost():
 # --- Full overlays (span entire 24x16 col2 area) ---
 
 def _build_firework():
-    """Bottle rocket launch with colorful burst."""
-    firework_colors = ["#ffcc00", "#ff44ff", "#00ffcc", "#ff8800", "#88ff00"]
-
+    """Big bottle rocket launch with multi-ring colorful burst across 24x16."""
     children = []
 
-    # Rocket launch (1px rising from bottom to top)
+    # Rocket trail (rises from bottom-center to burst point with a spark tail)
+    # Rocket body
     children.append(
         animation.Transformation(
-            child = render.Box(width = 1, height = 2, color = "#ffcc00"),
-            duration = 30,
-            delay = 5,
+            child = render.Box(width = 1, height = 3, color = "#ffcc00"),
+            duration = 40,
+            delay = 0,
             direction = "normal",
             fill_mode = "forwards",
             keyframes = [
-                animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(1, 14)], curve = "ease_out"),
-                animation.Keyframe(percentage = 0.4, transforms = [animation.Translate(0, 0)]),
-                animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(0, 0), animation.Scale(0.0, 0.0)]),
+                animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(11, 16)], curve = "ease_out"),
+                animation.Keyframe(percentage = 0.25, transforms = [animation.Translate(11, 2)]),
+                animation.Keyframe(percentage = 0.3, transforms = [animation.Translate(11, 2), animation.Scale(0.0, 0.0)]),
+                animation.Keyframe(percentage = 1.0, transforms = [animation.Scale(0.0, 0.0)]),
             ],
         ),
     )
 
-    # Burst sparks
-    spark_positions = [(-2, -1), (2, -1), (-1, -2), (1, -2), (0, -3), (-3, 0), (3, 0)]
-    for i, pos in enumerate(spark_positions):
-        color = firework_colors[i % len(firework_colors)]
+    # Rocket exhaust trail (faint, follows behind)
+    children.append(
+        animation.Transformation(
+            child = render.Box(width = 1, height = 2, color = "#884400"),
+            duration = 40,
+            delay = 0,
+            direction = "normal",
+            fill_mode = "forwards",
+            keyframes = [
+                animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(11, 18)], curve = "ease_out"),
+                animation.Keyframe(percentage = 0.25, transforms = [animation.Translate(11, 5)]),
+                animation.Keyframe(percentage = 0.3, transforms = [animation.Scale(0.0, 0.0)]),
+                animation.Keyframe(percentage = 1.0, transforms = [animation.Scale(0.0, 0.0)]),
+            ],
+        ),
+    )
+
+    # Flash at burst point (brief bright white)
+    children.append(
+        animation.Transformation(
+            child = render.Padding(
+                pad = (10, 1, 0, 0),
+                child = render.Box(width = 3, height = 3, color = "#ffffff"),
+            ),
+            duration = 40,
+            delay = 0,
+            direction = "normal",
+            fill_mode = "forwards",
+            keyframes = [
+                animation.Keyframe(percentage = 0.0, transforms = [animation.Scale(0.0, 0.0)]),
+                animation.Keyframe(percentage = 0.25, transforms = [animation.Scale(0.0, 0.0)]),
+                animation.Keyframe(percentage = 0.28, transforms = [animation.Scale(1.0, 1.0)]),
+                animation.Keyframe(percentage = 0.35, transforms = [animation.Scale(0.0, 0.0)]),
+                animation.Keyframe(percentage = 1.0, transforms = [animation.Scale(0.0, 0.0)]),
+            ],
+        ),
+    )
+
+    # Inner ring sparks — 8 directions, tight burst (red/white/blue patriotic)
+    inner_sparks = [
+        (0, -4, "#ff0000"), (0, 4, "#ffffff"), (-4, 0, "#0044ff"), (4, 0, "#ff0000"),
+        (-3, -3, "#ffffff"), (3, -3, "#0044ff"), (-3, 3, "#ff0000"), (3, 3, "#ffffff"),
+    ]
+    for dx, dy, color in inner_sparks:
         children.append(
             render.Padding(
-                pad = (1, 0, 0, 0),
+                pad = (11, 2, 0, 0),
                 child = animation.Transformation(
                     child = render.Box(width = 1, height = 1, color = color),
-                    duration = 30,
-                    delay = 5,
+                    duration = 40,
+                    delay = 0,
                     direction = "normal",
                     fill_mode = "forwards",
                     keyframes = [
                         animation.Keyframe(percentage = 0.0, transforms = [animation.Scale(0.0, 0.0)]),
-                        animation.Keyframe(percentage = 0.4, transforms = [animation.Scale(0.0, 0.0)]),
-                        animation.Keyframe(percentage = 0.5, transforms = [animation.Translate(0, 0), animation.Scale(1.0, 1.0)]),
-                        animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(pos[0], pos[1]), animation.Scale(0.0, 0.0)]),
+                        animation.Keyframe(percentage = 0.28, transforms = [animation.Scale(0.0, 0.0)]),
+                        animation.Keyframe(percentage = 0.35, transforms = [animation.Translate(0, 0), animation.Scale(1.0, 1.0)]),
+                        animation.Keyframe(percentage = 0.7, transforms = [animation.Translate(dx, dy), animation.Scale(1.0, 1.0)]),
+                        animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(dx, dy), animation.Scale(0.0, 0.0)]),
+                    ],
+                ),
+            ),
+        )
+
+    # Outer ring sparks — 8 more, wider spread, staggered timing (gold/red/blue)
+    outer_sparks = [
+        (0, -7, "#ffcc00"), (0, 7, "#ffcc00"), (-6, 0, "#ff4444"), (6, 0, "#ff4444"),
+        (-5, -5, "#4488ff"), (5, -5, "#ffcc00"), (-5, 5, "#4488ff"), (5, 5, "#ff4444"),
+    ]
+    for dx, dy, color in outer_sparks:
+        children.append(
+            render.Padding(
+                pad = (11, 2, 0, 0),
+                child = animation.Transformation(
+                    child = render.Box(width = 1, height = 1, color = color),
+                    duration = 40,
+                    delay = 0,
+                    direction = "normal",
+                    fill_mode = "forwards",
+                    keyframes = [
+                        animation.Keyframe(percentage = 0.0, transforms = [animation.Scale(0.0, 0.0)]),
+                        animation.Keyframe(percentage = 0.30, transforms = [animation.Scale(0.0, 0.0)]),
+                        animation.Keyframe(percentage = 0.40, transforms = [animation.Translate(0, 0), animation.Scale(1.0, 1.0)]),
+                        animation.Keyframe(percentage = 0.8, transforms = [animation.Translate(dx, dy), animation.Scale(1.0, 1.0)]),
+                        animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(dx + (1 if dx > 0 else -1), dy + (1 if dy > 0 else -1)), animation.Scale(0.0, 0.0)]),
+                    ],
+                ),
+            ),
+        )
+
+    # Falling sparkle trails (drip down after burst)
+    drip_positions = [4, 8, 14, 18]
+    drip_colors = ["#ffcc00", "#ff4444", "#ffffff", "#4488ff"]
+    for i, x in enumerate(drip_positions):
+        children.append(
+            render.Padding(
+                pad = (x, 0, 0, 0),
+                child = animation.Transformation(
+                    child = render.Box(width = 1, height = 1, color = drip_colors[i]),
+                    duration = 40,
+                    delay = 0,
+                    direction = "normal",
+                    fill_mode = "forwards",
+                    keyframes = [
+                        animation.Keyframe(percentage = 0.0, transforms = [animation.Scale(0.0, 0.0)]),
+                        animation.Keyframe(percentage = 0.5, transforms = [animation.Translate(0, 3), animation.Scale(0.0, 0.0)]),
+                        animation.Keyframe(percentage = 0.55, transforms = [animation.Translate(0, 3), animation.Scale(1.0, 1.0)]),
+                        animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(0, 14), animation.Scale(0.0, 0.0)]),
                     ],
                 ),
             ),
