@@ -136,18 +136,18 @@ def main(config):
         ],
     )
 
-    # Energy flow dots row
-    dots = [render.Box(width = 6)]
+    # Energy flow dots row (dots are 10px wide, centered at column boundaries)
+    dots = [render.Box(width = 17)]
 
-    # Solar -> Home flow dots
+    # Solar -> Home flow dots (centered at x=22)
     if solar_flow:
         dots.append(render.Image(src = DOTS_LTR))
     else:
         dots.append(render.Box(width = 10))
 
-    dots.append(render.Box(width = 12))
+    dots.append(render.Box(width = 10))
 
-    # Grid <-> Home flow dots
+    # Grid <-> Home flow dots (centered at x=42)
     if grid_flow == -1:
         dots.append(render.Image(src = DOTS_RTL))
     elif grid_flow == 1:
@@ -203,25 +203,26 @@ def build_weather_icon(weather_icon):
     return _moon_and_stars()
 
 def _moon_and_stars():
-    """Crescent moon with twinkling stars in 21x16 area."""
+    """Pixel-art crescent moon with twinkling stars in 21x16 area."""
     return render.Box(
         width = 21,
         height = 16,
         child = render.Stack(
             children = [
-                # Moon crescent: bright circle with dark overlay to create crescent
+                # Crescent moon built from pixel rows (left-facing crescent)
+                # Top tip
+                render.Padding(pad = (10, 3, 0, 0), child = render.Box(width = 1, height = 1, color = MOON_COLOR)),
+                # Upper body
+                render.Padding(pad = (9, 4, 0, 0), child = render.Box(width = 2, height = 1, color = MOON_COLOR)),
+                # Wide middle
+                render.Padding(pad = (8, 5, 0, 0), child = render.Box(width = 3, height = 2, color = MOON_COLOR)),
+                # Lower body
+                render.Padding(pad = (9, 7, 0, 0), child = render.Box(width = 2, height = 1, color = MOON_COLOR)),
+                # Bottom tip
+                render.Padding(pad = (10, 8, 0, 0), child = render.Box(width = 1, height = 1, color = MOON_COLOR)),
+                # Star 1 (top-left)
                 render.Padding(
-                    pad = (7, 3, 0, 0),
-                    child = render.Box(width = 7, height = 7, color = MOON_COLOR),
-                ),
-                # Dark cutout for crescent shape (overlaps top-right of moon)
-                render.Padding(
-                    pad = (10, 1, 0, 0),
-                    child = render.Box(width = 6, height = 6, color = "#000000"),
-                ),
-                # Star 1
-                render.Padding(
-                    pad = (2, 2, 0, 0),
+                    pad = (3, 2, 0, 0),
                     child = animation.Transformation(
                         child = render.Box(width = 1, height = 1, color = STAR_COLOR),
                         duration = 50,
@@ -234,9 +235,9 @@ def _moon_and_stars():
                         ],
                     ),
                 ),
-                # Star 2
+                # Star 2 (right)
                 render.Padding(
-                    pad = (17, 5, 0, 0),
+                    pad = (16, 6, 0, 0),
                     child = animation.Transformation(
                         child = render.Box(width = 1, height = 1, color = STAR_COLOR),
                         duration = 50,
@@ -249,9 +250,9 @@ def _moon_and_stars():
                         ],
                     ),
                 ),
-                # Star 3
+                # Star 3 (bottom-left)
                 render.Padding(
-                    pad = (4, 12, 0, 0),
+                    pad = (5, 12, 0, 0),
                     child = animation.Transformation(
                         child = render.Box(width = 1, height = 1, color = STAR_COLOR),
                         duration = 50,
@@ -269,21 +270,18 @@ def _moon_and_stars():
     )
 
 def _moon_and_cloud():
-    """Moon with a small drifting cloud."""
+    """Crescent moon with a small drifting cloud."""
     return render.Box(
         width = 21,
         height = 16,
         child = render.Stack(
             children = [
-                # Moon
-                render.Padding(
-                    pad = (7, 2, 0, 0),
-                    child = render.Box(width = 6, height = 6, color = MOON_COLOR),
-                ),
-                render.Padding(
-                    pad = (10, 0, 0, 0),
-                    child = render.Box(width = 5, height = 5, color = "#000000"),
-                ),
+                # Crescent moon (same shape, shifted up)
+                render.Padding(pad = (10, 1, 0, 0), child = render.Box(width = 1, height = 1, color = MOON_COLOR)),
+                render.Padding(pad = (9, 2, 0, 0), child = render.Box(width = 2, height = 1, color = MOON_COLOR)),
+                render.Padding(pad = (8, 3, 0, 0), child = render.Box(width = 3, height = 2, color = MOON_COLOR)),
+                render.Padding(pad = (9, 5, 0, 0), child = render.Box(width = 2, height = 1, color = MOON_COLOR)),
+                render.Padding(pad = (10, 6, 0, 0), child = render.Box(width = 1, height = 1, color = MOON_COLOR)),
                 # Drifting cloud
                 animation.Transformation(
                     child = render.Padding(
