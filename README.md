@@ -1,2 +1,2 @@
-# trmnlTeslatidbyt
+# tidbytTeslaPowerwall
 Plugin
