@@ -110,20 +110,25 @@ def main(config):
     else:
         load_color = "#ff4400"
 
-    # House icon with optional seasonal overlay
+    # House icon with optional seasonal overlay (overlay in 24px space for room)
     house_icon = build_house_icon()
     seasonal = get_seasonal_overlay(config)
     if seasonal:
-        house_icon = render.Stack(children = [house_icon, seasonal])
+        house_box = render.Box(width = 24, height = 16, child = render.Stack(children = [
+            render.Row(main_align = "center", children = [house_icon]),
+            seasonal,
+        ]))
+    else:
+        house_box = render.Box(width = 24, height = 16, child = render.Row(
+            main_align = "center",
+            children = [house_icon],
+        ))
 
     col2 = render.Column(
         main_align = "space_between",
         cross_align = "center",
         children = [
-            render.Box(width = 24, height = 16, child = render.Row(
-                main_align = "center",
-                children = [house_icon],
-            )),
+            house_box,
             render.Text(content = load_text, height = 8, font = "tb-8", color = load_color),
             render.Box(height = 8, child = build_battery_bar(battery_pct)),
         ],
@@ -234,13 +239,17 @@ def build_solar_icon():
 
     panel = render.Column(children = panel_rows)
 
-    # Animated sun rays (pulse in and out)
+    # Animated sun rays (pulse in and out) — 5 rays around 3x3 core
     sun_rays = animation.Transformation(
         child = render.Stack(children = [
-            render.Padding(pad = (2, 0, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffaa00")),
-            render.Padding(pad = (0, 2, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffaa00")),
-            render.Padding(pad = (4, 2, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffaa00")),
-            render.Padding(pad = (2, 4, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffaa00")),
+            render.Padding(pad = (1, 0, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffaa00")),
+            render.Padding(pad = (3, 0, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffaa00")),
+            render.Padding(pad = (0, 1, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffaa00")),
+            render.Padding(pad = (4, 1, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffaa00")),
+            render.Padding(pad = (0, 3, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffaa00")),
+            render.Padding(pad = (4, 3, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffaa00")),
+            render.Padding(pad = (1, 4, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffaa00")),
+            render.Padding(pad = (3, 4, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffaa00")),
         ]),
         duration = 18,
         delay = 0,
@@ -256,16 +265,16 @@ def build_solar_icon():
         width = 20,
         height = 16,
         child = render.Stack(children = [
-            # Sun core (2x2 yellow, top-left corner)
-            render.Padding(pad = (1, 1, 0, 0), child = render.Box(width = 2, height = 2, color = "#ffcc00")),
-            # Sun rays (animated pulse)
+            # Sun core (3x3 yellow, top-left corner)
+            render.Padding(pad = (1, 1, 0, 0), child = render.Box(width = 3, height = 3, color = "#ffcc00")),
+            # Sun rays (animated pulse around core)
             sun_rays,
-            # Panel body starting at y=3 (aligned with house roof)
-            render.Padding(pad = (4, 3, 0, 0), child = panel),
+            # Panel body starting at y=4 (below sun, aligned with house)
+            render.Padding(pad = (4, 4, 0, 0), child = panel),
             # Support post
-            render.Padding(pad = (9, 10, 0, 0), child = render.Box(width = 2, height = 2, color = SOLAR_GRAY)),
+            render.Padding(pad = (9, 11, 0, 0), child = render.Box(width = 2, height = 2, color = SOLAR_GRAY)),
             # Base
-            render.Padding(pad = (7, 12, 0, 0), child = render.Box(width = 6, height = 1, color = SOLAR_GRAY)),
+            render.Padding(pad = (7, 13, 0, 0), child = render.Box(width = 6, height = 1, color = SOLAR_GRAY)),
         ]),
     )
 
@@ -276,8 +285,8 @@ def build_house_icon():
         height = 16,
         child = render.Stack(
             children = [
-                # Chimney (right side)
-                render.Padding(pad = (12, 1, 0, 0), child = render.Box(width = 2, height = 3, color = HOUSE_CHIMNEY)),
+                # Chimney (on right slope of roof, connects at y=4)
+                render.Padding(pad = (10, 2, 0, 0), child = render.Box(width = 2, height = 3, color = HOUSE_CHIMNEY)),
                 # Roof - wide triangle shape
                 render.Padding(pad = (6, 3, 0, 0), child = render.Box(width = 4, height = 1, color = HOUSE_ROOF)),
                 render.Padding(pad = (5, 4, 0, 0), child = render.Box(width = 6, height = 1, color = HOUSE_ROOF)),
@@ -303,30 +312,30 @@ def build_grid_icon():
         height = 16,
         child = render.Stack(
             children = [
-                # Top cap
-                render.Padding(pad = (8, 1, 0, 0), child = render.Box(width = 2, height = 1, color = GRID_METAL)),
+                # Top cap (center: x=9-10 in 20px = exactly centered)
+                render.Padding(pad = (9, 1, 0, 0), child = render.Box(width = 2, height = 1, color = GRID_METAL)),
                 # Upper cross arm
-                render.Padding(pad = (5, 2, 0, 0), child = render.Box(width = 8, height = 1, color = GRID_METAL)),
-                # Wire attachment points
-                render.Padding(pad = (4, 3, 0, 0), child = render.Box(width = 1, height = 1, color = GRID_DARK)),
-                render.Padding(pad = (8, 3, 0, 0), child = render.Box(width = 2, height = 1, color = GRID_METAL)),
-                render.Padding(pad = (13, 3, 0, 0), child = render.Box(width = 1, height = 1, color = GRID_DARK)),
+                render.Padding(pad = (6, 2, 0, 0), child = render.Box(width = 8, height = 1, color = GRID_METAL)),
+                # Wire attachment points (symmetric: x=5 and x=14)
+                render.Padding(pad = (5, 3, 0, 0), child = render.Box(width = 1, height = 1, color = GRID_DARK)),
+                render.Padding(pad = (9, 3, 0, 0), child = render.Box(width = 2, height = 1, color = GRID_METAL)),
+                render.Padding(pad = (14, 3, 0, 0), child = render.Box(width = 1, height = 1, color = GRID_DARK)),
                 # Upper taper
-                render.Padding(pad = (7, 4, 0, 0), child = render.Box(width = 4, height = 1, color = GRID_METAL)),
-                render.Padding(pad = (8, 5, 0, 0), child = render.Box(width = 2, height = 1, color = GRID_METAL)),
+                render.Padding(pad = (8, 4, 0, 0), child = render.Box(width = 4, height = 1, color = GRID_METAL)),
+                render.Padding(pad = (9, 5, 0, 0), child = render.Box(width = 2, height = 1, color = GRID_METAL)),
                 # Center post
-                render.Padding(pad = (8, 6, 0, 0), child = render.Box(width = 2, height = 2, color = GRID_METAL)),
+                render.Padding(pad = (9, 6, 0, 0), child = render.Box(width = 2, height = 2, color = GRID_METAL)),
                 # Lower cross arm
-                render.Padding(pad = (6, 8, 0, 0), child = render.Box(width = 6, height = 1, color = GRID_METAL)),
-                # Lower wire points
-                render.Padding(pad = (5, 9, 0, 0), child = render.Box(width = 1, height = 1, color = GRID_DARK)),
-                render.Padding(pad = (8, 9, 0, 0), child = render.Box(width = 2, height = 1, color = GRID_METAL)),
-                render.Padding(pad = (12, 9, 0, 0), child = render.Box(width = 1, height = 1, color = GRID_DARK)),
+                render.Padding(pad = (7, 8, 0, 0), child = render.Box(width = 6, height = 1, color = GRID_METAL)),
+                # Lower wire points (symmetric: x=6 and x=13)
+                render.Padding(pad = (6, 9, 0, 0), child = render.Box(width = 1, height = 1, color = GRID_DARK)),
+                render.Padding(pad = (9, 9, 0, 0), child = render.Box(width = 2, height = 1, color = GRID_METAL)),
+                render.Padding(pad = (13, 9, 0, 0), child = render.Box(width = 1, height = 1, color = GRID_DARK)),
                 # Lower taper
-                render.Padding(pad = (7, 10, 0, 0), child = render.Box(width = 4, height = 1, color = GRID_METAL)),
-                render.Padding(pad = (8, 11, 0, 0), child = render.Box(width = 2, height = 2, color = GRID_METAL)),
+                render.Padding(pad = (8, 10, 0, 0), child = render.Box(width = 4, height = 1, color = GRID_METAL)),
+                render.Padding(pad = (9, 11, 0, 0), child = render.Box(width = 2, height = 2, color = GRID_METAL)),
                 # Base
-                render.Padding(pad = (7, 13, 0, 0), child = render.Box(width = 4, height = 1, color = GRID_DARK)),
+                render.Padding(pad = (8, 13, 0, 0), child = render.Box(width = 4, height = 1, color = GRID_DARK)),
             ],
         ),
     )
@@ -410,19 +419,21 @@ def get_seasonal_overlay(config):
     return None
 
 def _christmas_overlay():
-    """Snow on roof, twinkling lights, snowman, and present."""
-    # Twinkling Christmas lights along eave (alternate set A and B)
+    """Snow, twinkling lights, snowman, tree, present — in 24px col2 space.
+    House is 16px centered in 24px, so house x=0 maps to overlay x=4."""
+    # Twinkling Christmas lights along eave (house eave at overlay x=6-17, y=7)
+    # Lights at y=8 just below eave, alternating red/green with twinkle
     lights_a = render.Stack(children = [
-        render.Padding(pad = (3, 8, 0, 0), child = render.Box(width = 1, height = 1, color = "#ff0000")),
         render.Padding(pad = (7, 8, 0, 0), child = render.Box(width = 1, height = 1, color = "#ff0000")),
         render.Padding(pad = (11, 8, 0, 0), child = render.Box(width = 1, height = 1, color = "#ff0000")),
+        render.Padding(pad = (15, 8, 0, 0), child = render.Box(width = 1, height = 1, color = "#ff0000")),
     ])
     lights_b = render.Stack(children = [
-        render.Padding(pad = (5, 8, 0, 0), child = render.Box(width = 1, height = 1, color = "#00ff00")),
         render.Padding(pad = (9, 8, 0, 0), child = render.Box(width = 1, height = 1, color = "#00ff00")),
+        render.Padding(pad = (13, 8, 0, 0), child = render.Box(width = 1, height = 1, color = "#00ff00")),
+        render.Padding(pad = (17, 8, 0, 0), child = render.Box(width = 1, height = 1, color = "#00ff00")),
     ])
 
-    # Alternate twinkling: set A fades while B shows, then swap
     twinkling_a = animation.Transformation(
         child = lights_a,
         duration = 8,
@@ -448,22 +459,42 @@ def _christmas_overlay():
 
     return render.Stack(
         children = [
-            # Snow on roof peak (aligned to roof at y=3)
-            render.Padding(pad = (6, 2, 0, 0), child = render.Box(width = 4, height = 1, color = "#ffffff")),
-            render.Padding(pad = (4, 3, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffffff")),
-            render.Padding(pad = (11, 3, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffffff")),
+            # Snow ON roof peak (overlay coords: roof peak at x=10-13, y=3)
+            render.Padding(pad = (10, 3, 0, 0), child = render.Box(width = 4, height = 1, color = "#ffffff")),
+            # Snow drips on exposed roof edges
+            render.Padding(pad = (9, 4, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffffff")),
+            render.Padding(pad = (14, 4, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffffff")),
             # Twinkling Christmas lights
             twinkling_a,
             twinkling_b,
-            # Snowman (right of house, x=14-15, y=10-14)
-            render.Padding(pad = (14, 10, 0, 0), child = render.Box(width = 2, height = 2, color = "#ffffff")),  # head
-            render.Padding(pad = (14, 12, 0, 0), child = render.Box(width = 2, height = 2, color = "#ffffff")),  # body
-            render.Padding(pad = (14, 10, 0, 0), child = render.Box(width = 1, height = 1, color = "#000000")),  # left eye
-            render.Padding(pad = (15, 11, 0, 0), child = render.Box(width = 1, height = 1, color = "#ff8800")),  # carrot nose
-            # Present (left of house, x=1-2, y=12-13)
-            render.Padding(pad = (1, 12, 0, 0), child = render.Box(width = 2, height = 2, color = "#ff0000")),   # red box
-            render.Padding(pad = (1, 12, 0, 0), child = render.Box(width = 2, height = 1, color = "#ffcc00")),   # yellow ribbon top
-            render.Padding(pad = (2, 12, 0, 0), child = render.Box(width = 1, height = 2, color = "#ffcc00")),   # yellow ribbon vert
+            # Christmas tree (left side, x=0-3, y=7-14)
+            render.Padding(pad = (2, 7, 0, 0), child = render.Box(width = 1, height = 1, color = "#006600")),
+            render.Padding(pad = (1, 8, 0, 0), child = render.Box(width = 3, height = 1, color = "#008800")),
+            render.Padding(pad = (1, 9, 0, 0), child = render.Box(width = 1, height = 1, color = "#006600")),
+            render.Padding(pad = (3, 9, 0, 0), child = render.Box(width = 1, height = 1, color = "#006600")),
+            render.Padding(pad = (0, 10, 0, 0), child = render.Box(width = 5, height = 1, color = "#008800")),
+            render.Padding(pad = (0, 11, 0, 0), child = render.Box(width = 1, height = 1, color = "#006600")),
+            render.Padding(pad = (4, 11, 0, 0), child = render.Box(width = 1, height = 1, color = "#006600")),
+            render.Padding(pad = (0, 12, 0, 0), child = render.Box(width = 5, height = 1, color = "#008800")),
+            render.Padding(pad = (2, 13, 0, 0), child = render.Box(width = 1, height = 2, color = "#885522")),
+            # Tree star
+            render.Padding(pad = (2, 6, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffcc00")),
+            # Tree ornaments
+            render.Padding(pad = (2, 9, 0, 0), child = render.Box(width = 1, height = 1, color = "#ff0000")),
+            render.Padding(pad = (1, 11, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffcc00")),
+            render.Padding(pad = (3, 12, 0, 0), child = render.Box(width = 1, height = 1, color = "#ff0000")),
+            # Snowman (right side, x=19-22)
+            render.Padding(pad = (20, 8, 0, 0), child = render.Box(width = 2, height = 1, color = "#333333")),
+            render.Padding(pad = (19, 9, 0, 0), child = render.Box(width = 4, height = 1, color = "#333333")),
+            render.Padding(pad = (19, 10, 0, 0), child = render.Box(width = 3, height = 1, color = "#ffffff")),
+            render.Padding(pad = (19, 10, 0, 0), child = render.Box(width = 1, height = 1, color = "#000000")),
+            render.Padding(pad = (22, 10, 0, 0), child = render.Box(width = 1, height = 1, color = "#ff8800")),
+            render.Padding(pad = (19, 11, 0, 0), child = render.Box(width = 3, height = 1, color = "#ff0000")),
+            render.Padding(pad = (19, 12, 0, 0), child = render.Box(width = 3, height = 2, color = "#ffffff")),
+            # Present (right of tree, at base)
+            render.Padding(pad = (5, 13, 0, 0), child = render.Box(width = 2, height = 2, color = "#ff0000")),
+            render.Padding(pad = (5, 14, 0, 0), child = render.Box(width = 2, height = 1, color = "#ffcc00")),
+            render.Padding(pad = (6, 13, 0, 0), child = render.Box(width = 1, height = 2, color = "#ffcc00")),
         ],
     )
 
