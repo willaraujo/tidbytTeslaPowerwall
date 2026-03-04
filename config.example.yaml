@@ -24,4 +24,4 @@ tidbyt:
   installation_id: "powerwall"
 
 schedule:
-  interval_seconds: 120
+  interval_seconds: 15
