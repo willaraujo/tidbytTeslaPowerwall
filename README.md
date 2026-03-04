@@ -1,153 +1,175 @@
 # tidbytTeslaPowerwall
 
-Tesla Powerwall 3 energy monitor for Tidbyt Gen2 with animated weather effects. Pulls data from Home Assistant and displays solar production, home usage, grid power, and battery level with ambient weather animations (rain, snow, sun, clouds, wind).
+Turn your Tidbyt Gen2 into a live Tesla Powerwall monitor with animated weather.
+
+Shows solar production, home usage, grid power, and battery level at a glance -- with ambient weather animations (rain drops, snowflakes, twinkling stars, drifting clouds, wind streaks) that reflect your actual local weather in real time.
+
+## What You Need
+
+- **Tidbyt Gen2** -- set up on your wifi with the Tidbyt phone app
+- **Home Assistant** -- running on your network with the Tesla Powerwall integration installed
+- **A machine to run this script** -- Raspberry Pi, NAS, old laptop, or any always-on computer with Docker (or Python 3.11+)
+- No weather API key needed (uses Home Assistant's built-in weather)
 
 ## How It Works
 
 ```
-Home Assistant  ──►  Python Script  ──►  Pixlet Render  ──►  Tidbyt Push API  ──►  Tidbyt Gen2
-   (sensors)    ──►       │
-   (weather)    ──►       │    (or Pirate Weather API)
+Home Assistant  -->  Python Script  -->  Pixlet Render  -->  Tidbyt Cloud API  -->  Your Tidbyt
+  (Powerwall)                           (64x32 animated)
+  (Weather)
 ```
 
-1. Python fetches Powerwall sensor data from your Home Assistant REST API
-2. Python fetches current weather from Home Assistant weather entity (e.g. Met.no) or Pirate Weather API
-3. Pixlet renders a 64x32 animated display with energy data + weather effects
-4. The rendered WebP is pushed to your Tidbyt via its cloud API
-5. Repeats every 2 minutes (configurable)
+Every 2 minutes the script:
+1. Fetches your Powerwall sensor data from Home Assistant
+2. Fetches current weather from Home Assistant (or optionally Pirate Weather)
+3. Renders an animated 64x32 display using Pixlet
+4. Pushes the result to your Tidbyt via its cloud API
 
 ## Display Layout
 
-Three-column layout based on the Tesla Solar Tidbyt community app:
+```
+ [Solar]    [House]    [Grid]
+  1.92       0.78       1.12
+   kW     >>>  37%  <<<  kW
+```
 
 - **Column 1**: Solar panel icon + solar production (kW)
-- **Column 2**: House icon + home load + battery percentage
+- **Column 2**: House icon + home consumption + battery %
 - **Column 3**: Grid icon + grid power (import/export)
-- **Animated dots** show energy flow direction between columns
-- **Weather animations** overlay the display (rain drops, snow, sun glow, stars, clouds, wind streaks)
+- **Animated dots** flow between columns showing energy direction
+- **Weather animations** play behind the data (rain, snow, sun glow, stars, clouds, wind, fog)
 
-## Prerequisites
+At night, twinkling stars are automatically layered behind weather effects.
 
-- Tidbyt Gen2 device
-- Home Assistant with Tesla Powerwall integration (Tesla Custom Integration or official)
-- Weather provider — one of:
-  - **Home Assistant weather entity** (e.g. Met.no — the default HA weather integration, no API key needed)
-  - [Pirate Weather](https://pirateweather.net/) free API key
-- Tidbyt Device ID and API Token (from Tidbyt app: Settings > Developer)
-- Home Assistant long-lived access token
+---
 
-## Setup
+## Setup (Step by Step)
 
-### 1. Get Your Credentials
+### Step 1: Get your Home Assistant token
 
-**Home Assistant Token:**
-1. Go to your HA instance > Profile > Long-Lived Access Tokens
-2. Create a new token and copy it
+1. Open Home Assistant in a browser: `http://<your-HA-IP>:8123`
+2. Click your profile picture (bottom-left corner)
+3. Scroll all the way down to **Long-Lived Access Tokens**
+4. Click **Create Token**, name it `tidbyt`
+5. Copy the token immediately -- you won't be able to see it again
 
-**Tidbyt API:**
-1. Open the Tidbyt app on your phone
-2. Go to Settings > Developer
-3. Copy your Device ID and API Token
+### Step 2: Find your Powerwall sensor entity IDs
 
-**Weather (Option A — Home Assistant, recommended):**
-The Met.no (Meteorologisk institutt) integration is included by default in Home Assistant. No API key needed. Just note your weather entity ID (usually `weather.home` or `weather.forecast_home`):
-1. Go to HA > Developer Tools > States
-2. Filter for "weather" and find your entity (e.g. `weather.home`)
+1. In Home Assistant, go to **Developer Tools** > **States** tab
+2. In the filter box, type `powerwall` (or `tesla` or `battery`)
+3. Find and write down these 5 entity IDs:
 
-**Weather (Option B — Pirate Weather):**
-1. Sign up at [pirateweather.net](https://pirateweather.net/)
-2. Get your free API key (10,000 calls/day)
+| What | Example entity ID |
+|------|-------------------|
+| Battery % | `sensor.powerwall_battery` |
+| Solar production | `sensor.powerwall_solar_power` |
+| Home consumption | `sensor.powerwall_load_power` |
+| Grid power | `sensor.powerwall_grid_power` |
+| Grid status | `binary_sensor.powerwall_grid_status` |
 
-**Home Assistant Entity IDs:**
-1. Go to HA > Developer Tools > States
-2. Filter for "powerwall" or "tesla" or "battery"
-3. Find your entity IDs for: battery %, solar power, load power, grid power, grid status
+Your exact names may differ depending on your HA integration (e.g. `sensor.tesla_wall_connector_...`, `sensor.energy_site_...`).
 
-### 2. Configure
+### Step 3: Find your weather entity ID
+
+1. Still in **Developer Tools** > **States**
+2. Filter for `weather`
+3. You'll see something like `weather.home` or `weather.forecast_home`
+4. Write it down -- no API key needed, this uses HA's built-in Met.no integration
+
+### Step 4: Get your Tidbyt credentials
+
+1. Open the **Tidbyt app** on your phone
+2. Tap your Tidbyt device
+3. Go to **Settings** > **General** > scroll down to **Developer Info**
+4. Copy your **Device ID** and **API Token**
+
+### Step 5: Clone and configure
 
 ```bash
+git clone https://github.com/willaraujo/tidbytTeslaPowerwall.git
+cd tidbytTeslaPowerwall
 cp config.example.yaml config.yaml
 ```
 
-Edit `config.yaml` with your values:
+Edit `config.yaml` and fill in your values:
 
 ```yaml
 home_assistant:
-  url: "http://192.168.1.100:8123"
-  token: "your_long_lived_access_token"
+  url: "http://192.168.1.100:8123"          # your HA IP address
+  token: "eyJhbGci...your_long_token..."     # from Step 1
   sensors:
-    battery_pct: "sensor.powerwall_battery"
-    solar_power: "sensor.powerwall_solar_power"
-    load_power: "sensor.powerwall_load_power"
-    grid_power: "sensor.powerwall_grid_power"
-    grid_status: "binary_sensor.powerwall_grid_status"
+    battery_pct: "sensor.powerwall_battery"           # from Step 2
+    solar_power: "sensor.powerwall_solar_power"       # from Step 2
+    load_power: "sensor.powerwall_load_power"         # from Step 2
+    grid_power: "sensor.powerwall_grid_power"         # from Step 2
+    grid_status: "binary_sensor.powerwall_grid_status"  # from Step 2
 
-# Pick ONE weather provider below:
-
-# Option A: Home Assistant weather (Met.no — no API key needed)
 weather:
   provider: "homeassistant"
-  entity_id: "weather.home"
-
-# Option B: Pirate Weather (replace the block above with this)
-# weather:
-#   provider: "pirateweather"
-#   api_key: "your_pirate_weather_api_key"
-#   latitude: 28.5383
-#   longitude: -81.3792
+  entity_id: "weather.home"   # from Step 3
 
 tidbyt:
-  device_id: "your_tidbyt_device_id"
-  api_token: "your_tidbyt_api_token"
+  device_id: "your-device-id-here"    # from Step 4
+  api_token: "your-api-token-here"    # from Step 4
   installation_id: "powerwall"
 
 schedule:
-  interval_seconds: 120
+  interval_seconds: 120   # updates every 2 minutes
 ```
 
-### 3. Run with Docker (Recommended)
+### Step 6: Run it
+
+**Docker (recommended):**
 
 ```bash
 docker compose up -d
 ```
 
-View logs:
+Check the logs to make sure it's working:
+
 ```bash
 docker compose logs -f
 ```
 
-### 4. Run Without Docker
+You should see output like:
 
-Install [Pixlet](https://github.com/tidbyt/pixlet/releases):
+```
+INFO - HA weather: condition=sunny icon=clear-day temp=72 is_night=false
+INFO - Sun state: above_horizon (is_night=False)
+INFO - Successfully pushed to Tidbyt
+```
+
+**Without Docker:**
+
+Install Pixlet:
 ```bash
+# Linux (x86_64)
 curl -LO https://github.com/tidbyt/pixlet/releases/download/v0.34.0/pixlet_0.34.0_linux_amd64.tar.gz
 tar -xzf pixlet_0.34.0_linux_amd64.tar.gz
 sudo mv pixlet /usr/local/bin/
+
+# macOS (Apple Silicon)
+curl -LO https://github.com/tidbyt/pixlet/releases/download/v0.34.0/pixlet_0.34.0_darwin_arm64.tar.gz
+tar -xzf pixlet_0.34.0_darwin_arm64.tar.gz
+sudo mv pixlet /usr/local/bin/
 ```
 
-Install Python dependencies:
+Install Python dependencies and run:
 ```bash
 pip install -r requirements.txt
-```
-
-Run continuously:
-```bash
 python powerwall_push.py
 ```
 
-Run once (for cron):
-```bash
-python powerwall_push.py --once
-```
-
-Cron example (every 2 minutes):
+Or run once via cron (every 2 minutes):
 ```
 */2 * * * * cd /path/to/tidbytTeslaPowerwall && python powerwall_push.py --once
 ```
 
+---
+
 ## Local Preview
 
-Test the display layout without pushing to Tidbyt:
+Test the display without pushing to your Tidbyt:
 
 ```bash
 pixlet serve powerwall_tidbyt.star \
@@ -163,28 +185,47 @@ pixlet serve powerwall_tidbyt.star \
 
 Then open `http://localhost:8080` in your browser.
 
-## Weather Conditions
+## Alternative Weather: Pirate Weather
 
-The plugin supports both Pirate Weather and Home Assistant weather conditions. At nighttime, twinkling stars are automatically layered behind weather animations.
+If you prefer not to use Home Assistant's weather, you can use Pirate Weather instead:
 
-Day/night detection uses HA's `sun.sun` entity (built-in) when using the HA weather provider. Pirate Weather encodes day/night in its icon names.
+1. Sign up at [pirateweather.net](https://pirateweather.net/) (free, 10,000 calls/day)
+2. Get your API key
+3. Replace the `weather:` block in `config.yaml`:
 
-| Animation | Night variant | Pirate Weather | HA / Met.no |
-|-----------|--------------|---------------|-------------|
-| Yellow glow pixels pulsing | — | `clear-day` | `sunny` (day) |
-| Twinkling star dots | — | `clear-night` | `clear-night`, `sunny` (night) |
-| Blue drops falling | Stars + rain | `rain` | `rainy`, `pouring`, `lightning`, `lightning-rainy` |
-| White dots drifting | Stars + snow | `snow` | `snowy` |
-| Gray clusters drifting | Stars + clouds | `cloudy` | `cloudy` |
-| Sun glow + cloud drift | — | `partly-cloudy-day` | `partlycloudy` (day) |
-| Stars + cloud drift | — | `partly-cloudy-night` | `partlycloudy` (night) |
-| Fast horizontal streaks | Stars + wind | `wind` | `windy`, `windy-variant` |
-| Gray haze drifting | Stars + fog | `fog` | `fog` |
-| Same as rain | Stars + rain | `sleet` | `snowy-rainy`, `hail` |
+```yaml
+weather:
+  provider: "pirateweather"
+  api_key: "your_pirate_weather_api_key"
+  latitude: 28.5383
+  longitude: -81.3792
+```
+
+## Weather Animations
+
+At nighttime, twinkling stars are automatically layered behind all weather effects. Day/night detection uses HA's built-in `sun.sun` entity (no config needed).
+
+| Animation | Night variant | Pirate Weather icon | HA condition |
+|-----------|--------------|---------------------|--------------|
+| Yellow glow pixels | -- | `clear-day` | `sunny` (day) |
+| Twinkling stars | -- | `clear-night` | `sunny` (night) |
+| Blue rain drops | Stars + rain | `rain` | `rainy`, `pouring`, `lightning`, `lightning-rainy` |
+| White snowflakes | Stars + snow | `snow` | `snowy` |
+| Gray drifting clouds | Stars + clouds | `cloudy` | `cloudy` |
+| Sun glow + cloud | -- | `partly-cloudy-day` | `partlycloudy` (day) |
+| Stars + cloud | -- | `partly-cloudy-night` | `partlycloudy` (night) |
+| Horizontal wind streaks | Stars + wind | `wind` | `windy`, `windy-variant` |
+| Gray drifting haze | Stars + fog | `fog` | `fog` |
+| Rain drops | Stars + rain | `sleet` | `snowy-rainy`, `hail` |
 
 ## Troubleshooting
 
-- **"HA OFFLINE"**: Check your HA URL and token. Ensure HA is reachable from where the script runs.
-- **No weather animation**: If using Pirate Weather, verify your API key and lat/lon. If using HA, check that your weather entity ID is correct (`weather.home`, `weather.forecast_home`, etc.).
-- **Tidbyt not updating**: Check Device ID and API Token. The Tidbyt push API requires internet access.
-- **Docker can't reach HA**: If HA is on the same host, use the host's LAN IP (not `localhost`).
+| Problem | Fix |
+|---------|-----|
+| **"HA OFFLINE" in logs** | Check your HA URL and token. Make sure HA is reachable from where the script runs |
+| **No weather animation** | Check your weather entity ID in HA > Developer Tools > States. Try `weather.forecast_home` if `weather.home` doesn't exist |
+| **Tidbyt not updating** | Verify Device ID and API Token from the Tidbyt phone app. The machine needs internet access |
+| **Docker can't reach HA** | Use your HA's LAN IP (e.g. `192.168.1.100`), not `localhost`. In Docker, localhost means the container itself |
+| **Wrong sensor values** | Double-check entity IDs in HA Developer Tools > States -- copy them exactly |
+| **Raspberry Pi build fails** | Add `--build-arg TARGETARCH=arm64` to your docker build command |
+| **Night detection seems wrong** | Check `TZ` in `docker-compose.yml` -- change `America/New_York` to your timezone |
