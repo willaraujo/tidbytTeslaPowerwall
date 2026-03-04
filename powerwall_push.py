@@ -15,7 +15,6 @@ import time
 from pathlib import Path
 
 import requests
-import websockets
 import yaml
 
 logging.basicConfig(
@@ -402,6 +401,12 @@ def _initial_fetch_to_cache(config):
     return cache
 
 
+try:
+    import websockets
+except ImportError:
+    websockets = None  # Only needed for WebSocket mode
+
+
 async def _ws_authenticate(ws, token):
     """Handle HA WebSocket authentication handshake."""
     msg = json.loads(await ws.recv())
@@ -435,6 +440,10 @@ async def _ws_subscribe(ws):
 
 async def ws_loop(config):
     """Main WebSocket event loop with auto-reconnect."""
+    if websockets is None:
+        logger.error("websockets package required for WebSocket mode: pip install websockets")
+        sys.exit(1)
+
     ha_config = config["home_assistant"]
     ha_url = ha_config["url"].rstrip("/")
     token = ha_config["token"]
