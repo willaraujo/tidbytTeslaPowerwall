@@ -211,14 +211,14 @@ def render_pixlet(sensor_data, weather_data):
     cmd = [
         "pixlet", "render", str(STAR_FILE),
         "-o", str(WEBP_OUTPUT),
-        "-c", f"battery_pct={sensor_data.get('battery_pct', '0')}",
-        "-c", f"solar_power={sensor_data.get('solar_power', '0')}",
-        "-c", f"load_power={sensor_data.get('load_power', '0')}",
-        "-c", f"grid_power={sensor_data.get('grid_power', '0')}",
-        "-c", f"grid_status={sensor_data.get('grid_status', 'on')}",
-        "-c", f"weather_icon={weather_data.get('icon', 'clear-day')}",
-        "-c", f"temperature={weather_data.get('temperature', '')}",
-        "-c", f"is_night={weather_data.get('is_night', 'false')}",
+        f"battery_pct={sensor_data.get('battery_pct', '0')}",
+        f"solar_power={sensor_data.get('solar_power', '0')}",
+        f"load_power={sensor_data.get('load_power', '0')}",
+        f"grid_power={sensor_data.get('grid_power', '0')}",
+        f"grid_status={sensor_data.get('grid_status', 'on')}",
+        f"weather_icon={weather_data.get('icon', 'clear-day')}",
+        f"temperature={weather_data.get('temperature', '')}",
+        f"is_night={weather_data.get('is_night', 'false')}",
     ]
 
     logger.info("Running: %s", " ".join(cmd))
