@@ -190,9 +190,9 @@ def main(config):
             render.Row(
                 expanded = True,
                 children = [
-                    render.Box(width = 22, child = col1),
-                    render.Box(width = 20, child = col2),
-                    render.Box(width = 22, child = col3),
+                    render.Box(width = 20, child = col1),
+                    render.Box(width = 24, child = col2),
+                    render.Box(width = 20, child = col3),
                 ],
             ),
             render.Column(
@@ -217,42 +217,36 @@ def build_battery_bar(battery_pct):
     if battery_pct > 0 and filled == 0:
         filled = 1
 
-    # Gradient segments
+    # Gradient segments (no gaps, compact bar)
     segs = []
     for i in range(8):
         color = BATT_GRADIENT[i] if i < filled else BATT_EMPTY
-        segs.append(render.Box(width = 1, height = 5, color = color))
-        if i < 7:
-            segs.append(render.Box(width = 1, height = 5))
+        segs.append(render.Box(width = 1, height = 3, color = color))
     interior_bg = render.Row(children = segs)
 
-    # Battery icon (no text overlay)
+    # Compact battery icon (10px body + 1px tip = 11px)
     battery_icon = render.Row(
         children = [
             render.Stack(
                 children = [
-                    render.Box(width = 17, height = 7, color = BATT_OUTLINE),
+                    render.Box(width = 10, height = 5, color = BATT_OUTLINE),
                     render.Padding(
                         pad = (1, 1, 1, 1),
-                        child = render.Box(width = 15, height = 5, color = "#000000", child = interior_bg),
+                        child = render.Box(width = 8, height = 3, color = "#000000", child = interior_bg),
                     ),
                 ],
             ),
             render.Padding(
-                pad = (0, 2, 0, 0),
+                pad = (0, 1, 0, 0),
                 child = render.Box(width = 1, height = 3, color = BATT_OUTLINE),
             ),
         ],
     )
 
     # Percentage text to the right of the battery
-    if battery_pct >= 100:
-        pct_text = "100"
-    else:
-        pct_text = "%d%%" % battery_pct
+    pct_text = "%d%%" % battery_pct
 
     return render.Row(
-        main_align = "center",
         cross_align = "center",
         children = [
             battery_icon,
