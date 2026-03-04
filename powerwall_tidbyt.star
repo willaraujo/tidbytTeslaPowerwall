@@ -129,7 +129,7 @@ def main(config):
                 children = [render.Image(src = HOUSE)],
             )),
             render.Text(content = load_text, height = 8, font = "tb-8", color = load_color),
-            build_battery_bar(battery_pct),
+            render.Box(height = 8, child = build_battery_bar(battery_pct)),
         ],
     )
 
