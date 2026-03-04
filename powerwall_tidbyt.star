@@ -247,6 +247,8 @@ def build_weather_animation(weather_icon):
         return night_animation()
     elif weather_icon == "cloudy":
         return cloud_animation()
+    elif weather_icon == "overcast":
+        return overcast_animation()
     elif weather_icon == "partly-cloudy-day":
         return partly_cloudy_day_animation()
     elif weather_icon == "partly-cloudy-night":
@@ -404,26 +406,88 @@ def night_animation():
     return render.Stack(children = stars)
 
 def cloud_animation():
-    """Subtle gray cloud pixels drifting horizontally."""
+    """Multiple cloud shapes drifting at different heights and speeds."""
     clouds = []
-    # Small cloud-like clusters drifting across top
-    cloud_y_positions = [0, 1]
+    # Cloud clusters: (y_position, width, height, speed_duration, delay, color)
+    cloud_defs = [
+        (1, 10, 3, 90, 0, "#3a3a3a"),
+        (5, 6, 2, 70, 30, "#444444"),
+        (26, 8, 2, 85, 50, "#3a3a3a"),
+    ]
 
-    for y in cloud_y_positions:
+    for cloud_def in cloud_defs:
+        y, w, h, dur, delay, color = cloud_def[0], cloud_def[1], cloud_def[2], cloud_def[3], cloud_def[4], cloud_def[5]
         clouds.append(
             animation.Transformation(
                 child = render.Padding(
                     pad = (0, y, 0, 0),
-                    child = render.Box(width = 8, height = 3, color = CLOUD_COLOR),
+                    child = render.Row(
+                        children = [
+                            render.Box(width = w, height = h, color = color),
+                            render.Padding(
+                                pad = (0, 1, 0, 0),
+                                child = render.Box(width = int(w / 2), height = max(h - 1, 1), color = color),
+                            ),
+                        ],
+                    ),
                 ),
-                duration = 80,
-                delay = y * 20,
+                duration = dur,
+                delay = delay,
                 direction = "normal",
                 fill_mode = "forwards",
                 keyframes = [
                     animation.Keyframe(
                         percentage = 0.0,
-                        transforms = [animation.Translate(-10, 0)],
+                        transforms = [animation.Translate(-15, 0)],
+                        curve = "linear",
+                    ),
+                    animation.Keyframe(
+                        percentage = 1.0,
+                        transforms = [animation.Translate(70, 0)],
+                    ),
+                ],
+            ),
+        )
+
+    return render.Stack(children = clouds)
+
+def overcast_animation():
+    """Heavy cloud cover -- more clouds, darker, multiple layers."""
+    clouds = []
+    # Dense cloud layer: (y, width, height, duration, delay, color)
+    cloud_defs = [
+        (0, 12, 3, 100, 0, "#333333"),
+        (2, 8, 2, 75, 15, "#3a3a3a"),
+        (4, 10, 3, 90, 40, "#2e2e2e"),
+        (14, 7, 2, 80, 25, "#333333"),
+        (24, 9, 3, 85, 10, "#2e2e2e"),
+        (27, 6, 2, 70, 50, "#3a3a3a"),
+    ]
+
+    for cloud_def in cloud_defs:
+        y, w, h, dur, delay, color = cloud_def[0], cloud_def[1], cloud_def[2], cloud_def[3], cloud_def[4], cloud_def[5]
+        clouds.append(
+            animation.Transformation(
+                child = render.Padding(
+                    pad = (0, y, 0, 0),
+                    child = render.Row(
+                        children = [
+                            render.Box(width = w, height = h, color = color),
+                            render.Padding(
+                                pad = (0, 1, 0, 0),
+                                child = render.Box(width = int(w / 2), height = max(h - 1, 1), color = color),
+                            ),
+                        ],
+                    ),
+                ),
+                duration = dur,
+                delay = delay,
+                direction = "normal",
+                fill_mode = "forwards",
+                keyframes = [
+                    animation.Keyframe(
+                        percentage = 0.0,
+                        transforms = [animation.Translate(-15, 0)],
                         curve = "linear",
                     ),
                     animation.Keyframe(
@@ -437,15 +501,72 @@ def cloud_animation():
     return render.Stack(children = clouds)
 
 def partly_cloudy_day_animation():
-    """Sun glow with occasional cloud drift."""
+    """Sun glow with a single small cloud drifting through."""
     sun = sun_animation()
-    cloud = cloud_animation()
+    # Just one small cloud -- "partly" means mostly clear
+    cloud = animation.Transformation(
+        child = render.Padding(
+            pad = (0, 2, 0, 0),
+            child = render.Row(
+                children = [
+                    render.Box(width = 7, height = 2, color = "#444444"),
+                    render.Padding(
+                        pad = (0, 1, 0, 0),
+                        child = render.Box(width = 3, height = 1, color = "#444444"),
+                    ),
+                ],
+            ),
+        ),
+        duration = 90,
+        delay = 0,
+        direction = "normal",
+        fill_mode = "forwards",
+        keyframes = [
+            animation.Keyframe(
+                percentage = 0.0,
+                transforms = [animation.Translate(-12, 0)],
+                curve = "linear",
+            ),
+            animation.Keyframe(
+                percentage = 1.0,
+                transforms = [animation.Translate(70, 0)],
+            ),
+        ],
+    )
     return render.Stack(children = [sun, cloud])
 
 def partly_cloudy_night_animation():
-    """Stars with occasional cloud drift."""
+    """Stars with a single small cloud drifting through."""
     stars = night_animation()
-    cloud = cloud_animation()
+    cloud = animation.Transformation(
+        child = render.Padding(
+            pad = (0, 2, 0, 0),
+            child = render.Row(
+                children = [
+                    render.Box(width = 7, height = 2, color = "#3a3a3a"),
+                    render.Padding(
+                        pad = (0, 1, 0, 0),
+                        child = render.Box(width = 3, height = 1, color = "#3a3a3a"),
+                    ),
+                ],
+            ),
+        ),
+        duration = 90,
+        delay = 0,
+        direction = "normal",
+        fill_mode = "forwards",
+        keyframes = [
+            animation.Keyframe(
+                percentage = 0.0,
+                transforms = [animation.Translate(-12, 0)],
+                curve = "linear",
+            ),
+            animation.Keyframe(
+                percentage = 1.0,
+                transforms = [animation.Translate(70, 0)],
+            ),
+        ],
+    )
     return render.Stack(children = [stars, cloud])
 
 def wind_animation():
