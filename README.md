@@ -1,4 +1,4 @@
-# Powerwall Tidbyt Plugin
+# tidbytTeslaPowerwall
 
 Tesla Powerwall 3 energy monitor for Tidbyt Gen2 with animated weather effects. Pulls data from Home Assistant and displays solar production, home usage, grid power, and battery level with ambient weather animations (rain, snow, sun, clouds, wind).
 
@@ -28,7 +28,7 @@ Three-column layout based on the Tesla Solar Tidbyt community app:
 
 ## Prerequisites
 
-- Tidbyt Gen2 connected via TRMNL (or standalone)
+- Tidbyt Gen2 device
 - Home Assistant with Tesla Powerwall integration (Tesla Custom Integration or official)
 - Weather provider — one of:
   - **Home Assistant weather entity** (e.g. Met.no — the default HA weather integration, no API key needed)
@@ -142,7 +142,7 @@ python powerwall_push.py --once
 
 Cron example (every 2 minutes):
 ```
-*/2 * * * * cd /path/to/trmnlTeslatidbyt && python powerwall_push.py --once
+*/2 * * * * cd /path/to/tidbytTeslaPowerwall && python powerwall_push.py --once
 ```
 
 ## Local Preview
