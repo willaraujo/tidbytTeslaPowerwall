@@ -642,11 +642,31 @@ def _build_ghost():
 
 # --- Full overlays (span entire 24x16 col2 area) ---
 
-def _build_burst(x, y, size, colors, delay, duration):
-    """Build one radial burst at (x,y). size='small' (5px +) or 'big' (9px full).
-    Returns list of animated children."""
+def _build_rocket(launch_x, burst_x, burst_y, trail_color, burst_colors, size, delay, duration):
+    """One bottle rocket: launches from ground, rises to burst point, explodes.
+    Returns list of animation children.
+    launch_x: ground x position, burst_x/burst_y: explosion apex,
+    size: 'small' (dim, distant) or 'big' (bright, close)."""
     children = []
 
+    # --- Rocket trail rising from ground to burst point ---
+    children.append(
+        animation.Transformation(
+            child = render.Box(width = 1, height = 2, color = trail_color),
+            duration = duration,
+            delay = delay,
+            direction = "normal",
+            fill_mode = "forwards",
+            keyframes = [
+                animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(launch_x, 15)], curve = "ease_out"),
+                animation.Keyframe(percentage = 0.35, transforms = [animation.Translate(burst_x, burst_y)]),
+                animation.Keyframe(percentage = 0.4, transforms = [animation.Translate(burst_x, burst_y), animation.Scale(0.0, 0.0)]),
+                animation.Keyframe(percentage = 1.0, transforms = [animation.Scale(0.0, 0.0)]),
+            ],
+        ),
+    )
+
+    # --- Explosion burst at apex ---
     if size == "small":
         offsets = [(0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)]
     else:
@@ -654,18 +674,15 @@ def _build_burst(x, y, size, colors, delay, duration):
 
     for i, offset in enumerate(offsets):
         dx, dy = offset[0], offset[1]
-        px = x + dx
-        py = y + dy
-
-        # Clamp to 24x16 bounds
+        px = burst_x + dx
+        py = burst_y + dy
         if px < 0 or px > 23 or py < 0 or py > 15:
             continue
 
-        color = colors[i % len(colors)]
-        ripple = i * 1  # stagger each pixel by 1 frame for ripple effect
+        color = burst_colors[i % len(burst_colors)]
+        ripple = i * 1
 
         if size == "big":
-            # Big burst: appear, hold, drift down 1px, fade
             children.append(
                 render.Padding(
                     pad = (px, py, 0, 0),
@@ -677,16 +694,16 @@ def _build_burst(x, y, size, colors, delay, duration):
                         fill_mode = "forwards",
                         keyframes = [
                             animation.Keyframe(percentage = 0.0, transforms = [animation.Scale(0.0, 0.0)]),
-                            animation.Keyframe(percentage = 0.05, transforms = [animation.Scale(1.0, 1.0)]),
-                            animation.Keyframe(percentage = 0.5, transforms = [animation.Translate(0, 0), animation.Scale(1.0, 1.0)]),
-                            animation.Keyframe(percentage = 0.8, transforms = [animation.Translate(0, 1), animation.Scale(1.0, 1.0)]),
-                            animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(0, 2), animation.Scale(0.0, 0.0)]),
+                            animation.Keyframe(percentage = 0.35, transforms = [animation.Scale(0.0, 0.0)]),
+                            animation.Keyframe(percentage = 0.4, transforms = [animation.Scale(1.0, 1.0)]),
+                            animation.Keyframe(percentage = 0.65, transforms = [animation.Translate(0, 0), animation.Scale(1.0, 1.0)]),
+                            animation.Keyframe(percentage = 0.9, transforms = [animation.Translate(0, 2), animation.Scale(0.0, 0.0)]),
+                            animation.Keyframe(percentage = 1.0, transforms = [animation.Scale(0.0, 0.0)]),
                         ],
                     ),
                 ),
             )
         else:
-            # Small burst: appear and fade (no drift)
             children.append(
                 render.Padding(
                     pad = (px, py, 0, 0),
@@ -698,8 +715,9 @@ def _build_burst(x, y, size, colors, delay, duration):
                         fill_mode = "forwards",
                         keyframes = [
                             animation.Keyframe(percentage = 0.0, transforms = [animation.Scale(0.0, 0.0)]),
-                            animation.Keyframe(percentage = 0.05, transforms = [animation.Scale(1.0, 1.0)]),
-                            animation.Keyframe(percentage = 0.6, transforms = [animation.Scale(1.0, 1.0)]),
+                            animation.Keyframe(percentage = 0.35, transforms = [animation.Scale(0.0, 0.0)]),
+                            animation.Keyframe(percentage = 0.4, transforms = [animation.Scale(1.0, 1.0)]),
+                            animation.Keyframe(percentage = 0.7, transforms = [animation.Scale(1.0, 1.0)]),
                             animation.Keyframe(percentage = 1.0, transforms = [animation.Scale(0.0, 0.0)]),
                         ],
                     ),
@@ -708,47 +726,47 @@ def _build_burst(x, y, size, colors, delay, duration):
 
     return children
 
-def _build_fireworks(bg_bursts, fg_bursts, duration):
-    """Build layered fireworks. Returns (behind_stack, front_stack) for depth."""
+def _build_fireworks(bg_rockets, fg_rockets, duration):
+    """Build layered bottle rocket volley. Returns (behind_stack, front_stack).
+    Each rocket: (launch_x, burst_x, burst_y, trail_color, burst_colors, delay)."""
     bg_children = []
-    for burst in bg_bursts:
-        bg_children.extend(_build_burst(burst[0], burst[1], "small", burst[2], burst[3], duration))
+    for r in bg_rockets:
+        bg_children.extend(_build_rocket(r[0], r[1], r[2], r[3], r[4], "small", r[5], duration))
 
     fg_children = []
-    for burst in fg_bursts:
-        fg_children.extend(_build_burst(burst[0], burst[1], "big", burst[2], burst[3], duration))
+    for r in fg_rockets:
+        fg_children.extend(_build_rocket(r[0], r[1], r[2], r[3], r[4], "big", r[5], duration))
 
     bg = render.Stack(children = bg_children) if bg_children else None
     fg = render.Stack(children = fg_children) if fg_children else None
     return (bg, fg)
 
 def _july4_fireworks():
-    """July 4th: warm, rapid volley across the sky."""
-    dim = ["#884400", "#664400", "#886644"]
-    bright = ["#ff4400", "#ffcc00", "#ff8800", "#ffffff"]
+    """July 4th: bottle rocket volley — warm reds, oranges, golds, white sparks."""
+    # Background (dim, distant rockets)
     bg = [
-        (2, 2, dim, 4),
-        (21, 3, dim, 16),
-        (12, 1, dim, 28),
+        #  launch_x, burst_x, burst_y, trail,     burst_colors,                          delay
+        (1, 3, 2, "#774400", ["#aa5500", "#886633", "#995522"], 2),
+        (22, 20, 1, "#774400", ["#aa6600", "#885533", "#997744"], 18),
+        (10, 12, 2, "#664400", ["#886633", "#775522", "#aa6644"], 32),
     ]
+    # Foreground (bright, close rockets)
     fg = [
-        (6, 4, bright, 0),
-        (17, 3, bright, 10),
-        (11, 5, bright, 22),
+        (4, 6, 4, "#ffaa00", ["#ff4400", "#ff6600", "#ffaa00", "#ffffff"], 0),
+        (19, 17, 3, "#ffaa00", ["#ff5500", "#ffcc00", "#ff8800", "#ffffff"], 12),
+        (11, 10, 5, "#ffcc00", ["#ff3300", "#ff7700", "#ffbb00", "#ffffff"], 24),
     ]
-    return _build_fireworks(bg, fg, 36)
+    return _build_fireworks(bg, fg, 38)
 
 def _newyear_fireworks():
-    """New Year's: elegant gold/silver celebration."""
-    dim = ["#555577", "#446666", "#665588"]
-    bright = ["#ffcc00", "#ffffff", "#cc88ff", "#00cccc"]
+    """New Year's: elegant gold, silver, purple celebration."""
     bg = [
-        (3, 3, dim, 6),
-        (20, 2, dim, 24),
+        (2, 4, 3, "#555544", ["#777766", "#666655", "#888877"], 4),
+        (21, 19, 2, "#555544", ["#777766", "#666677", "#888866"], 22),
     ]
     fg = [
-        (8, 4, bright, 0),
-        (18, 3, bright, 16),
+        (7, 9, 4, "#ccaa00", ["#ffcc00", "#ffffff", "#cc88ff", "#ffdd44"], 0),
+        (17, 16, 3, "#ccaa00", ["#ffdd00", "#ffffff", "#aa66ee", "#00ccaa"], 14),
     ]
     return _build_fireworks(bg, fg, 40)
 
