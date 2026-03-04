@@ -649,7 +649,10 @@ def _build_rocket(launch_x, burst_x, burst_y, trail_color, burst_colors, size, d
     size: 'small' (dim, distant) or 'big' (bright, close)."""
     children = []
 
-    # --- Rocket trail rising from ground to burst point ---
+    # --- Rocket trail arcing from ground to burst point (cannonball trajectory) ---
+    # Midpoint: halfway between launch and burst horizontally, peaks above burst vertically
+    mid_x = (launch_x + burst_x) // 2
+    mid_y = burst_y - 2 if burst_y >= 2 else 0  # arc peaks above the burst point
     children.append(
         animation.Transformation(
             child = render.Box(width = 1, height = 2, color = trail_color),
@@ -659,6 +662,7 @@ def _build_rocket(launch_x, burst_x, burst_y, trail_color, burst_colors, size, d
             fill_mode = "forwards",
             keyframes = [
                 animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(launch_x, 15)], curve = "ease_out"),
+                animation.Keyframe(percentage = 0.2, transforms = [animation.Translate(mid_x, mid_y)], curve = "ease_in_out"),
                 animation.Keyframe(percentage = 0.35, transforms = [animation.Translate(burst_x, burst_y)]),
                 animation.Keyframe(percentage = 0.4, transforms = [animation.Translate(burst_x, burst_y), animation.Scale(0.0, 0.0)]),
                 animation.Keyframe(percentage = 1.0, transforms = [animation.Scale(0.0, 0.0)]),
