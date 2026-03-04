@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Orchestrator: fetch Powerwall data from HA + weather from Pirate Weather,
-render via Pixlet, push to Tidbyt."""
+"""Orchestrator: fetch Powerwall data from HA + weather, render via Pixlet,
+push to Tidbyt. Supports Pirate Weather API or Home Assistant weather entities
+(e.g. Met.no / Meteorologisk institutt)."""
 
 import base64
 import logging
@@ -94,7 +95,81 @@ def fetch_all_sensors(config):
     return results
 
 
+# Map Home Assistant weather conditions to Pirate Weather icon names
+# used by the Starlark renderer.
+HA_CONDITION_MAP = {
+    "sunny": "clear-day",
+    "clear-night": "clear-night",
+    "partlycloudy": "partly-cloudy-day",    # day/night resolved below
+    "cloudy": "cloudy",
+    "rainy": "rain",
+    "pouring": "rain",
+    "snowy": "snow",
+    "snowy-rainy": "sleet",
+    "hail": "sleet",
+    "fog": "fog",
+    "windy": "wind",
+    "windy-variant": "wind",
+    "lightning": "rain",
+    "lightning-rainy": "rain",
+    "exceptional": "cloudy",
+}
+
+
 def fetch_weather(config):
+    """Fetch weather using the configured provider."""
+    weather_config = config.get("weather", {})
+    provider = weather_config.get("provider", "pirateweather")
+
+    if provider == "homeassistant":
+        return fetch_weather_ha(config)
+    return fetch_weather_pirate(config)
+
+
+def fetch_weather_ha(config):
+    """Fetch current weather from a Home Assistant weather entity (e.g. Met.no)."""
+    ha_config = config["home_assistant"]
+    ha_url = ha_config["url"].rstrip("/")
+    token = ha_config["token"]
+    weather_config = config.get("weather", {})
+    entity_id = weather_config.get("entity_id", "weather.home")
+
+    url = f"{ha_url}/api/states/{entity_id}"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        resp = requests.get(url, headers=headers, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+
+        condition = data.get("state", "sunny")
+        attrs = data.get("attributes", {})
+        temp = attrs.get("temperature", "")
+
+        # Map HA condition to renderer icon name
+        icon = HA_CONDITION_MAP.get(condition, "cloudy")
+
+        # Distinguish partly-cloudy day vs night using HA's friendly condition
+        if condition == "partlycloudy":
+            # If a clear-night condition exists nearby or it's after sunset,
+            # HA may not tell us directly — default to day variant.
+            # Users can override via a template sensor if needed.
+            icon = "partly-cloudy-day"
+
+        if temp != "":
+            temp = str(int(round(float(temp))))
+
+        logger.info("HA weather: condition=%s icon=%s temp=%s", condition, icon, temp)
+        return {"icon": icon, "temperature": temp}
+    except requests.RequestException as e:
+        logger.error("Failed to fetch HA weather (%s): %s", entity_id, e)
+        return {"icon": "clear-day", "temperature": ""}
+
+
+def fetch_weather_pirate(config):
     """Fetch current weather from Pirate Weather API."""
     weather_config = config.get("weather", {})
     api_key = weather_config.get("api_key", "")

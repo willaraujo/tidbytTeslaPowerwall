@@ -6,11 +6,12 @@ Tesla Powerwall 3 energy monitor for Tidbyt Gen2 with animated weather effects. 
 
 ```
 Home Assistant  ──►  Python Script  ──►  Pixlet Render  ──►  Tidbyt Push API  ──►  Tidbyt Gen2
-Pirate Weather  ──►       │
+   (sensors)    ──►       │
+   (weather)    ──►       │    (or Pirate Weather API)
 ```
 
 1. Python fetches Powerwall sensor data from your Home Assistant REST API
-2. Python fetches current weather from Pirate Weather API
+2. Python fetches current weather from Home Assistant weather entity (e.g. Met.no) or Pirate Weather API
 3. Pixlet renders a 64x32 animated display with energy data + weather effects
 4. The rendered WebP is pushed to your Tidbyt via its cloud API
 5. Repeats every 2 minutes (configurable)
@@ -29,7 +30,9 @@ Three-column layout based on the Tesla Solar Tidbyt community app:
 
 - Tidbyt Gen2 connected via TRMNL (or standalone)
 - Home Assistant with Tesla Powerwall integration (Tesla Custom Integration or official)
-- [Pirate Weather](https://pirateweather.net/) free API key (for weather animations)
+- Weather provider — one of:
+  - **Home Assistant weather entity** (e.g. Met.no — the default HA weather integration, no API key needed)
+  - [Pirate Weather](https://pirateweather.net/) free API key
 - Tidbyt Device ID and API Token (from Tidbyt app: Settings > Developer)
 - Home Assistant long-lived access token
 
@@ -46,7 +49,12 @@ Three-column layout based on the Tesla Solar Tidbyt community app:
 2. Go to Settings > Developer
 3. Copy your Device ID and API Token
 
-**Pirate Weather:**
+**Weather (Option A — Home Assistant, recommended):**
+The Met.no (Meteorologisk institutt) integration is included by default in Home Assistant. No API key needed. Just note your weather entity ID (usually `weather.home` or `weather.forecast_home`):
+1. Go to HA > Developer Tools > States
+2. Filter for "weather" and find your entity (e.g. `weather.home`)
+
+**Weather (Option B — Pirate Weather):**
 1. Sign up at [pirateweather.net](https://pirateweather.net/)
 2. Get your free API key (10,000 calls/day)
 
@@ -74,11 +82,17 @@ home_assistant:
     grid_power: "sensor.powerwall_grid_power"
     grid_status: "binary_sensor.powerwall_grid_status"
 
+## Option A: Home Assistant weather (Met.no — no API key needed)
 weather:
-  provider: "pirateweather"
-  api_key: "your_pirate_weather_api_key"
-  latitude: 28.5383
-  longitude: -81.3792
+  provider: "homeassistant"
+  entity_id: "weather.home"
+
+## Option B: Pirate Weather (external API)
+# weather:
+#   provider: "pirateweather"
+#   api_key: "your_pirate_weather_api_key"
+#   latitude: 28.5383
+#   longitude: -81.3792
 
 tidbyt:
   device_id: "your_tidbyt_device_id"
@@ -148,24 +162,24 @@ Then open `http://localhost:8080` in your browser.
 
 ## Weather Conditions
 
-The plugin responds to these Pirate Weather conditions with ambient animations:
+The plugin supports both Pirate Weather and Home Assistant weather conditions:
 
-| Condition | Animation |
-|-----------|-----------|
-| `clear-day` | Yellow glow pixels pulsing in corners |
-| `clear-night` | Twinkling star dots |
-| `rain` | Blue drops falling across the display |
-| `snow` | White dots drifting down with wobble |
-| `cloudy` | Gray pixel clusters drifting horizontally |
-| `partly-cloudy-day` | Sun glow + cloud drift |
-| `partly-cloudy-night` | Stars + cloud drift |
-| `wind` | Fast horizontal streaks |
-| `fog` | Gray haze drifting slowly |
-| `sleet` | Same as rain |
+| Animation | Pirate Weather | HA / Met.no |
+|-----------|---------------|-------------|
+| Yellow glow pixels pulsing | `clear-day` | `sunny` |
+| Twinkling star dots | `clear-night` | `clear-night` |
+| Blue drops falling | `rain` | `rainy`, `pouring`, `lightning`, `lightning-rainy` |
+| White dots drifting | `snow` | `snowy` |
+| Gray clusters drifting | `cloudy` | `cloudy` |
+| Sun glow + cloud drift | `partly-cloudy-day` | `partlycloudy` |
+| Stars + cloud drift | `partly-cloudy-night` | — |
+| Fast horizontal streaks | `wind` | `windy`, `windy-variant` |
+| Gray haze drifting | `fog` | `fog` |
+| Same as rain | `sleet` | `snowy-rainy`, `hail` |
 
 ## Troubleshooting
 
 - **"HA OFFLINE"**: Check your HA URL and token. Ensure HA is reachable from where the script runs.
-- **No weather animation**: Verify your Pirate Weather API key and lat/lon coordinates.
+- **No weather animation**: If using Pirate Weather, verify your API key and lat/lon. If using HA, check that your weather entity ID is correct (`weather.home`, `weather.forecast_home`, etc.).
 - **Tidbyt not updating**: Check Device ID and API Token. The Tidbyt push API requires internet access.
 - **Docker can't reach HA**: If HA is on the same host, use the host's LAN IP (not `localhost`).

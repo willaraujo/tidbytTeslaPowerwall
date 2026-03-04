@@ -8,11 +8,18 @@ home_assistant:
     grid_power: "sensor.powerwall_grid_power"
     grid_status: "binary_sensor.powerwall_grid_status"
 
+## Weather provider: "pirateweather" (external API) or "homeassistant" (HA weather entity)
 weather:
   provider: "pirateweather"
+  ## --- Pirate Weather settings (only needed when provider is "pirateweather") ---
   api_key: "your_pirate_weather_api_key"
   latitude: 28.5383
   longitude: -81.3792
+  ## --- Home Assistant weather settings (only needed when provider is "homeassistant") ---
+  ## Uses your HA weather entity (e.g. Met.no / Meteorologisk institutt).
+  ## No API key needed — weather data comes from the same HA instance.
+  # provider: "homeassistant"
+  # entity_id: "weather.home"
 
 tidbyt:
   device_id: "your_tidbyt_device_id"
