@@ -259,11 +259,11 @@ def build_solar_icon(solar_power = 0, weather_icon = "clear-day"):
         weather_dim = 0.7
     effective = intensity * weather_dim
 
-    # Dynamic sun colors
-    core_color = _lerp_color("#553300", "#ffcc00", effective)
-    ray_color = _lerp_color("#664400", "#ffaa00", effective)
+    # Dynamic sun colors — dim amber to bright yellow
+    core_color = _lerp_color("#aa7700", "#ffdd00", effective)
+    ray_color = _lerp_color("#996600", "#ffbb00", effective)
     ray_count = int(effective * 8)
-    ray_speed = max(12, 24 - int(effective * 12))
+    ray_speed = max(40, 80 - int(effective * 40))
 
     # Build panel rows
     panel_rows = []
@@ -333,19 +333,19 @@ def build_solar_icon(solar_power = 0, weather_icon = "clear-day"):
     return render.Box(width = 20, height = 16, child = render.Stack(children = children))
 
 def _solar_cloud_overlay(weather_icon):
-    """Drifting cloud(s) over solar panel. More clouds for heavier overcast."""
+    """Drifting puffy cloud(s) over solar panel. More clouds for heavier overcast."""
     children = []
     # First cloud — always present for any cloud condition
     children.append(
         animation.Transformation(
-            child = render.Padding(pad = (0, 1, 0, 0), child = _cloud_shape(w = 8, h = 2)),
-            duration = 30,
+            child = render.Padding(pad = (0, 0, 0, 0), child = _cloud_shape(w = 10, h = 4)),
+            duration = 80,
             delay = 0,
             direction = "normal",
             fill_mode = "forwards",
             keyframes = [
-                animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(-10, 0)], curve = "linear"),
-                animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(22, 0)]),
+                animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(-12, 0)], curve = "linear"),
+                animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(24, 0)]),
             ],
         ),
     )
@@ -353,14 +353,14 @@ def _solar_cloud_overlay(weather_icon):
     if weather_icon in ("cloudy", "overcast"):
         children.append(
             animation.Transformation(
-                child = render.Padding(pad = (0, 4, 0, 0), child = _cloud_shape(color = "#444444", w = 6, h = 2)),
-                duration = 24,
-                delay = 12,
+                child = render.Padding(pad = (0, 5, 0, 0), child = _cloud_shape(color = "#555555", w = 8, h = 3)),
+                duration = 60,
+                delay = 30,
                 direction = "normal",
                 fill_mode = "forwards",
                 keyframes = [
-                    animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(-8, 0)], curve = "linear"),
-                    animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(22, 0)]),
+                    animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(-10, 0)], curve = "linear"),
+                    animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(24, 0)]),
                 ],
             ),
         )
@@ -369,13 +369,13 @@ def _solar_cloud_overlay(weather_icon):
 def _solar_rain_overlay():
     """Rain drops falling over the solar panel area."""
     drops = []
-    for x, delay in zip([3, 12], [0, 4]):
+    for x, delay in zip([3, 10, 16], [0, 8, 16]):
         drops.append(
             render.Padding(
                 pad = (x, 0, 0, 0),
                 child = animation.Transformation(
                     child = render.Box(width = 1, height = 2, color = RAIN_COLOR),
-                    duration = 12,
+                    duration = 30,
                     delay = delay,
                     direction = "normal",
                     fill_mode = "forwards",
@@ -386,20 +386,20 @@ def _solar_rain_overlay():
                 ),
             ),
         )
-    # Cloud at top
-    drops.append(render.Padding(pad = (4, 0, 0, 0), child = _cloud_shape(w = 8, h = 2)))
+    # Puffy cloud at top
+    drops.append(render.Padding(pad = (3, 0, 0, 0), child = _cloud_shape(w = 10, h = 3)))
     return drops
 
 def _solar_snow_overlay():
     """Snowflakes drifting over the solar panel area."""
     flakes = []
-    for x, delay in zip([2, 14], [0, 5]):
+    for x, delay in zip([2, 10, 16], [0, 12, 24]):
         flakes.append(
             render.Padding(
                 pad = (x, 0, 0, 0),
                 child = animation.Transformation(
                     child = render.Box(width = 1, height = 1, color = SNOW_COLOR),
-                    duration = 20,
+                    duration = 50,
                     delay = delay,
                     direction = "normal",
                     fill_mode = "forwards",
@@ -411,17 +411,18 @@ def _solar_snow_overlay():
                 ),
             ),
         )
-    flakes.append(render.Padding(pad = (4, 0, 0, 0), child = _cloud_shape(w = 8, h = 2)))
+    # Puffy cloud at top
+    flakes.append(render.Padding(pad = (3, 0, 0, 0), child = _cloud_shape(w = 10, h = 3)))
     return flakes
 
 def _solar_wind_overlay():
     """Wind streaks blowing across the solar area."""
     streaks = []
-    for y, delay in zip([3, 9], [0, 2]):
+    for y, delay in zip([3, 9], [0, 6]):
         streaks.append(
             animation.Transformation(
                 child = render.Padding(pad = (0, y, 0, 0), child = render.Box(width = 4, height = 1, color = WIND_COLOR)),
-                duration = 6,
+                duration = 20,
                 delay = delay,
                 direction = "normal",
                 fill_mode = "forwards",
@@ -436,11 +437,11 @@ def _solar_wind_overlay():
 def _solar_fog_overlay():
     """Fog haze drifting over the solar area."""
     haze = []
-    for y, delay in zip([2, 8], [0, 6]):
+    for y, delay in zip([2, 8], [0, 15]):
         haze.append(
             animation.Transformation(
-                child = render.Padding(pad = (0, y, 0, 0), child = render.Box(width = 8, height = 2, color = FOG_COLOR)),
-                duration = 25,
+                child = render.Padding(pad = (0, y, 0, 0), child = render.Box(width = 10, height = 2, color = FOG_COLOR)),
+                duration = 60,
                 delay = delay,
                 direction = "alternate",
                 fill_mode = "forwards",
@@ -1011,10 +1012,16 @@ def _twinkling_star(x, y, delay):
     )
 
 def _cloud_shape(color = CLOUD_COLOR, w = 10, h = 3):
-    """Small pixel-art cloud: main body + trailing bump."""
-    return render.Row(children = [
-        render.Box(width = w, height = h, color = color),
-        render.Padding(pad = (0, 1, 0, 0), child = render.Box(width = w // 2, height = h - 1, color = color)),
+    """Puffy pixel-art cloud with rounded top bumps."""
+    # Build a cloud with a flat base and bumps on top for a puffy look
+    bump_w = max(2, w // 3)
+    return render.Stack(children = [
+        # Top-left bump
+        render.Padding(pad = (1, 0, 0, 0), child = render.Box(width = bump_w, height = max(1, h - 1), color = color)),
+        # Top-right bump (offset right and slightly higher for variety)
+        render.Padding(pad = (max(1, w - bump_w - 1), 0, 0, 0), child = render.Box(width = bump_w, height = max(1, h - 1), color = color)),
+        # Main body (wider, lower)
+        render.Padding(pad = (0, max(1, h // 2), 0, 0), child = render.Box(width = w, height = max(2, h - h // 2), color = color)),
     ])
 
 def _moon_and_stars():
