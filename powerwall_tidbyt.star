@@ -191,20 +191,40 @@ def main(config):
 # --- Battery bar (outlined battery icon with gradient segments) ---
 
 def build_battery_bar(battery_pct):
-    """Build a battery icon: 17x7 outline body + 1px nub, 8 gradient segments inside."""
+    """Build a battery icon with gradient segments and percentage text overlay."""
     filled = int(battery_pct * 8 / 100)
     if battery_pct > 0 and filled == 0:
         filled = 1
 
-    # Build interior segment row (8 segments × 1px + 7 gaps × 1px = 15px)
+    # Gradient segments (bottom layer)
     segs = []
     for i in range(8):
         color = BATT_GRADIENT[i] if i < filled else BATT_EMPTY
         segs.append(render.Box(width = 1, height = 5, color = color))
         if i < 7:
             segs.append(render.Box(width = 1, height = 5))
+    interior_bg = render.Row(children = segs)
 
-    interior = render.Row(children = segs)
+    # Percentage text (top layer, white on transparent)
+    if battery_pct >= 100:
+        pct_text = "100"
+    else:
+        pct_text = "%d%%" % battery_pct
+    interior_text = render.Row(
+        expanded = True,
+        main_align = "center",
+        children = [
+            render.Text(content = pct_text, font = "tom-thumb", color = "#ffffff"),
+        ],
+    )
+
+    # Stack: gradient segments behind text
+    interior = render.Stack(
+        children = [
+            interior_bg,
+            interior_text,
+        ],
+    )
 
     return render.Row(
         children = [
