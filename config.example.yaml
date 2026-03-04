@@ -23,5 +23,7 @@ tidbyt:
   api_token: "your_tidbyt_api_token"
   installation_id: "powerwall"
 
+## Update mode: "websocket" (real-time via HA WebSocket) or "polling" (REST every N seconds)
 schedule:
-  interval_seconds: 15
+  mode: "websocket"
+  interval_seconds: 15    # only used in polling mode
