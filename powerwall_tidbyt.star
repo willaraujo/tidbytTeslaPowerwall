@@ -89,6 +89,16 @@ WEATHER_PRECIP = ("rain", "sleet", "snow")
 WEATHER_RAIN = ("rain", "sleet")
 WEATHER_CLOUD_FULL = ("cloudy", "overcast")
 
+# Character colors (living world)
+CHAR_SKIN = "#ffcc88"
+CHAR_PARENT1_SHIRT = "#4488cc"
+CHAR_PARENT2_SHIRT = "#cc4444"
+CHAR_KID_SHIRT = "#44cc44"
+CHAR_PANTS = "#555555"
+CHAR_SHOES = "#333333"
+DOG_COLOR = "#aa7744"
+CAT_COLOR = "#888888"
+
 def main(config):
     """Render 3-column energy dashboard: Solar/Weather | Home/Battery | Grid.
     Animated energy flow dots show power direction between columns."""
@@ -228,8 +238,10 @@ def main(config):
     else:
         dots.append(render.Box(width = 10))
 
-    # Main display: layered stack with sky background, columns, weather overlay, dots
+    # Main display: layered stack
+    # Layer 0: sky background (night), Layer 1: columns, Layer 2: life, Layer 3: weather, Layer 4: dots
     sky_bg = build_sky_background(is_night)
+    life_overlay = build_life_overlay(config)
     weather_overlay = build_weather_overlay(weather_icon, is_night)
 
     display_children = []
@@ -246,6 +258,9 @@ def main(config):
             ],
         ),
     )
+
+    if life_overlay:
+        display_children.append(life_overlay)
 
     if weather_overlay:
         display_children.append(weather_overlay)
@@ -1165,6 +1180,272 @@ def build_weather_scene(weather_icon, sun_elevation = 0.0, is_night = True):
     if is_night or weather_icon.endswith("-night"):
         return _clear_night_scene(sun_elevation)
     return _clear_day_scene(sun_elevation)
+
+# --- Full-width sky & weather overlay (64x32) ---
+
+# --- Living world: characters, pets, random encounters ---
+
+def _pixel_person(x, y, shirt_color):
+    """3x4 pixel person at position (x, y)."""
+    return render.Stack(children = [
+        render.Padding(pad = (x + 1, y, 0, 0), child = render.Box(width = 1, height = 1, color = CHAR_SKIN)),
+        render.Padding(pad = (x, y + 1, 0, 0), child = render.Box(width = 3, height = 1, color = shirt_color)),
+        render.Padding(pad = (x + 1, y + 2, 0, 0), child = render.Box(width = 1, height = 1, color = CHAR_PANTS)),
+        render.Padding(pad = (x, y + 3, 0, 0), child = render.Box(width = 1, height = 1, color = CHAR_SHOES)),
+        render.Padding(pad = (x + 2, y + 3, 0, 0), child = render.Box(width = 1, height = 1, color = CHAR_SHOES)),
+    ])
+
+def _pixel_dog(x, y):
+    """4x3 pixel dog at position (x, y)."""
+    return render.Stack(children = [
+        render.Padding(pad = (x, y, 0, 0), child = render.Box(width = 1, height = 1, color = DOG_COLOR)),
+        render.Padding(pad = (x + 1, y, 0, 0), child = render.Box(width = 3, height = 1, color = DOG_COLOR)),
+        render.Padding(pad = (x + 1, y + 1, 0, 0), child = render.Box(width = 3, height = 1, color = DOG_COLOR)),
+        render.Padding(pad = (x + 1, y + 2, 0, 0), child = render.Box(width = 1, height = 1, color = DOG_COLOR)),
+        render.Padding(pad = (x + 3, y + 2, 0, 0), child = render.Box(width = 1, height = 1, color = DOG_COLOR)),
+    ])
+
+def _pixel_cat(x, y):
+    """3x2 pixel cat at position (x, y)."""
+    return render.Stack(children = [
+        render.Padding(pad = (x, y, 0, 0), child = render.Box(width = 1, height = 1, color = "#aaaaaa")),
+        render.Padding(pad = (x + 1, y, 0, 0), child = render.Box(width = 2, height = 1, color = CAT_COLOR)),
+        render.Padding(pad = (x + 1, y + 1, 0, 0), child = render.Box(width = 1, height = 1, color = CAT_COLOR)),
+        render.Padding(pad = (x + 2, y + 1, 0, 0), child = render.Box(width = 1, height = 1, color = CAT_COLOR)),
+    ])
+
+def _pixel_ufo(x, y):
+    """5x3 pixel UFO at position (x, y)."""
+    return render.Stack(children = [
+        render.Padding(pad = (x + 1, y, 0, 0), child = render.Box(width = 3, height = 1, color = "#44ff44")),
+        render.Padding(pad = (x, y + 1, 0, 0), child = render.Box(width = 5, height = 1, color = "#888888")),
+        render.Padding(pad = (x + 1, y + 2, 0, 0), child = render.Box(width = 1, height = 1, color = "#ff0000")),
+        render.Padding(pad = (x + 3, y + 2, 0, 0), child = render.Box(width = 1, height = 1, color = "#0044ff")),
+    ])
+
+def _pixel_yeti(x, y):
+    """4x5 SkiFree yeti at position (x, y)."""
+    return render.Stack(children = [
+        render.Padding(pad = (x + 1, y, 0, 0), child = render.Box(width = 2, height = 1, color = "#ffffff")),
+        render.Padding(pad = (x, y + 1, 0, 0), child = render.Box(width = 4, height = 2, color = "#eeeeee")),
+        render.Padding(pad = (x + 1, y + 3, 0, 0), child = render.Box(width = 2, height = 1, color = "#dddddd")),
+        render.Padding(pad = (x, y + 4, 0, 0), child = render.Box(width = 1, height = 1, color = "#cccccc")),
+        render.Padding(pad = (x + 3, y + 4, 0, 0), child = render.Box(width = 1, height = 1, color = "#cccccc")),
+    ])
+
+def _walking_person(shirt_color, start_x, end_x, y, duration, delay = 0):
+    """Animate a person walking from start_x to end_x."""
+    return animation.Transformation(
+        child = _pixel_person(0, y, shirt_color),
+        duration = duration,
+        delay = delay,
+        direction = "normal",
+        fill_mode = "forwards",
+        keyframes = [
+            animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(start_x, 0)], curve = "linear"),
+            animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(end_x, 0)]),
+        ],
+    )
+
+def _walking_entity(entity, start_x, end_x, duration, delay = 0):
+    """Animate any sprite walking from start_x to end_x."""
+    return animation.Transformation(
+        child = entity,
+        duration = duration,
+        delay = delay,
+        direction = "normal",
+        fill_mode = "forwards",
+        keyframes = [
+            animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(start_x, 0)], curve = "linear"),
+            animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(end_x, 0)]),
+        ],
+    )
+
+def _scene_leaving_home():
+    """Parent walks from house toward grid."""
+    return [_walking_person(CHAR_PARENT1_SHIRT, 30, 55, 11, 80)]
+
+def _scene_coming_home():
+    """Parent walks from grid back to house."""
+    return [_walking_person(CHAR_PARENT2_SHIRT, 55, 30, 11, 80)]
+
+def _scene_solar_work():
+    """Person walks from house to solar panel."""
+    return [_walking_person(CHAR_PARENT1_SHIRT, 30, 8, 11, 80)]
+
+def _scene_walk_dog():
+    """Person + dog walk together from house rightward."""
+    return [
+        _walking_person(CHAR_PARENT2_SHIRT, 28, 52, 11, 90),
+        _walking_entity(_pixel_dog(0, 12), 32, 56, 90),
+    ]
+
+def _scene_kid_plays():
+    """Kid runs back and forth near house."""
+    return [
+        animation.Transformation(
+            child = _pixel_person(0, 11, CHAR_KID_SHIRT),
+            duration = 60,
+            delay = 0,
+            direction = "alternate",
+            fill_mode = "forwards",
+            keyframes = [
+                animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(28, 0)], curve = "ease_in_out"),
+                animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(42, 0)]),
+            ],
+        ),
+    ]
+
+def _scene_cat_wander():
+    """Cat darts across screen fast."""
+    return [_walking_entity(_pixel_cat(0, 13), 5, 60, 40)]
+
+def _scene_family_walk():
+    """Two adults + kid walking together."""
+    return [
+        _walking_person(CHAR_PARENT1_SHIRT, 26, 50, 11, 100),
+        _walking_person(CHAR_PARENT2_SHIRT, 30, 54, 11, 100),
+        _walking_person(CHAR_KID_SHIRT, 28, 52, 12, 100),
+    ]
+
+def _scene_ufo():
+    """UFO flies across the sky."""
+    return [animation.Transformation(
+        child = _pixel_ufo(0, 2),
+        duration = 60,
+        delay = 0,
+        direction = "normal",
+        fill_mode = "forwards",
+        keyframes = [
+            animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(-8, 0)], curve = "linear"),
+            animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(72, 0)]),
+        ],
+    )]
+
+def _scene_abduction():
+    """UFO hovers over person, tractor beam pulls them up."""
+    children = []
+    # UFO flies in and stops over victim
+    children.append(animation.Transformation(
+        child = _pixel_ufo(0, 1),
+        duration = 100,
+        delay = 0,
+        direction = "normal",
+        fill_mode = "forwards",
+        keyframes = [
+            animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(-8, 0)], curve = "ease_out"),
+            animation.Keyframe(percentage = 0.30, transforms = [animation.Translate(28, 0)]),
+            animation.Keyframe(percentage = 0.70, transforms = [animation.Translate(28, 0)]),
+            animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(72, 0)]),
+        ],
+    ))
+    # Tractor beam (visible while UFO hovers)
+    children.append(animation.Transformation(
+        child = render.Padding(pad = (30, 4, 0, 0),
+            child = render.Box(width = 3, height = 10, color = "#225522")),
+        duration = 100,
+        delay = 0,
+        direction = "normal",
+        fill_mode = "forwards",
+        keyframes = [
+            animation.Keyframe(percentage = 0.0, transforms = [animation.Scale(0.0, 0.0)]),
+            animation.Keyframe(percentage = 0.30, transforms = [animation.Scale(0.0, 0.0)]),
+            animation.Keyframe(percentage = 0.35, transforms = [animation.Scale(1.0, 1.0)]),
+            animation.Keyframe(percentage = 0.65, transforms = [animation.Scale(1.0, 1.0)]),
+            animation.Keyframe(percentage = 0.70, transforms = [animation.Scale(0.0, 0.0)]),
+            animation.Keyframe(percentage = 1.0, transforms = [animation.Scale(0.0, 0.0)]),
+        ],
+    ))
+    # Person being pulled up
+    children.append(animation.Transformation(
+        child = _pixel_person(30, 11, CHAR_PARENT1_SHIRT),
+        duration = 100,
+        delay = 0,
+        direction = "normal",
+        fill_mode = "forwards",
+        keyframes = [
+            animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(0, 0)]),
+            animation.Keyframe(percentage = 0.35, transforms = [animation.Translate(0, 0)]),
+            animation.Keyframe(percentage = 0.65, transforms = [animation.Translate(0, -10)]),
+            animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(0, -10)]),
+        ],
+    ))
+    return children
+
+def _scene_yeti():
+    """SkiFree yeti chases and eats a person."""
+    children = []
+    # Person running — starts ahead but yeti catches up
+    children.append(animation.Transformation(
+        child = _pixel_person(0, 10, CHAR_PARENT1_SHIRT),
+        duration = 80,
+        delay = 0,
+        direction = "normal",
+        fill_mode = "forwards",
+        keyframes = [
+            animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(24, 0)], curve = "linear"),
+            animation.Keyframe(percentage = 0.55, transforms = [animation.Translate(44, 0)]),
+            # Yeti catches them — person disappears (scale to 0)
+            animation.Keyframe(percentage = 0.60, transforms = [animation.Translate(44, 0), animation.Scale(0.0, 0.0)]),
+            animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(44, 0), animation.Scale(0.0, 0.0)]),
+        ],
+    ))
+    # Yeti chasing — faster, catches up at 60%
+    children.append(animation.Transformation(
+        child = _pixel_yeti(0, 10),
+        duration = 80,
+        delay = 0,
+        direction = "normal",
+        fill_mode = "forwards",
+        keyframes = [
+            animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(14, 0)], curve = "linear"),
+            animation.Keyframe(percentage = 0.55, transforms = [animation.Translate(42, 0)]),
+            # Yeti stops briefly to eat (stays at catch point)
+            animation.Keyframe(percentage = 0.75, transforms = [animation.Translate(42, 0)]),
+            # Then walks off screen
+            animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(68, 0)]),
+        ],
+    ))
+    return children
+
+def _activity_seed(config):
+    """Deterministic pseudo-random seed from power values."""
+    b = int(config.get("battery_pct", "0"))
+    s = int(float(config.get("solar_power", "0")))
+    l = int(float(config.get("load_power", "0")))
+    g = int(float(config.get("grid_power", "0")))
+    return (b * 7 + s * 13 + l * 19 + g * 23) % 100
+
+def build_life_overlay(config):
+    """Build character/activity overlay based on deterministic seed from power values."""
+    seed = _activity_seed(config)
+    children = []
+    if seed < 20:
+        children = _scene_leaving_home()
+    elif seed < 40:
+        children = _scene_coming_home()
+    elif seed < 50:
+        children = _scene_solar_work()
+    elif seed < 60:
+        children = _scene_walk_dog()
+    elif seed < 70:
+        children = _scene_kid_plays()
+    elif seed < 75:
+        children = _scene_cat_wander()
+    elif seed < 80:
+        children = _scene_family_walk()
+    elif seed < 90:
+        return None
+    elif seed < 94:
+        children = _scene_ufo()
+    elif seed < 97:
+        children = _scene_abduction()
+    else:
+        children = _scene_yeti()
+
+    if not children:
+        return None
+    return render.Box(width = 64, height = 32, child = render.Stack(children = children))
 
 # --- Full-width sky & weather overlay (64x32) ---
 
