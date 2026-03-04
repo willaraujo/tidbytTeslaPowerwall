@@ -34,9 +34,9 @@ HOUSE = base64.decode(
 
 # Animated energy flow dots (GIF)
 DOTS_LTR = base64.decode(
-    "R0lGODlhCgAFAIABAA31VAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQJDwABACwAAAAACgAFAAAC" +
-    "CYyPmWAc7pRMBQAh+QQJDwABACwAAAAACgAFAAACCIyPqWAcrmIsACH5BAkPAAEALAAAAAAKAAUA" +
-    "AAIIjI+pAda8oioAOw=="
+    "R0lGODlhCgAFAIEAAP/RGwAAAAAAAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQJCgABACwAAAAA" +
+    "CgAFAAAIFAADCBxIsGBBAAIRBlCo0KDDggEBACH5BAkKAAEALAEAAgAHAAEAgf/RGwAAAAAAAAAA" +
+    "AAgIAAEECCCQYEAAIfkECQoAAQAsAgACAAcAAQCB/9EbAAAAAAAAAAAACAgAAQQIIJBgQAA7"
 )
 
 DOTS_RTL = base64.decode(
@@ -91,7 +91,7 @@ def main(config):
         batt_color = "#ffcc00"
 
     batt_unit = "%d%%" % battery_pct
-    solar_color = "#ffd11a" if solar_power > 0 else "#666666"
+    solar_color = "#00cc00" if solar_power > 0 else "#666666"
 
     # Column 1: Solar / Weather
     col1 = render.Column(
@@ -122,6 +122,8 @@ def main(config):
     grid_color = "#ffd11a"
     if grid_status != "on" and grid_status != "On":
         grid_color = "#ff0000"
+    elif grid_power < -10:
+        grid_color = "#00cc00"
 
     col3 = render.Column(
         main_align = "space_between",

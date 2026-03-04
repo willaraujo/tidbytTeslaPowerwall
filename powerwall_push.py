@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Orchestrator: fetch Powerwall data from HA + weather, render via Pixlet,
-push to Tidbyt. Supports Pirate Weather API or Home Assistant weather entities
+push to Tidbyt. Supports polling (REST) or real-time (WebSocket) modes.
+Weather via Pirate Weather API or Home Assistant weather entities
 (e.g. Met.no / Meteorologisk institutt)."""
 
+import asyncio
 import base64
+import json
 import logging
 import os
 import subprocess
@@ -12,6 +15,7 @@ import time
 from pathlib import Path
 
 import requests
+import websockets
 import yaml
 
 logging.basicConfig(
@@ -293,24 +297,237 @@ def run_once(config):
     return True
 
 
+# ---------------------------------------------------------------------------
+# WebSocket real-time mode
+# ---------------------------------------------------------------------------
+
+def _build_watched_entities(config):
+    """Build set of entity IDs to watch via WebSocket."""
+    watched = set(config["home_assistant"]["sensors"].values())
+    weather_config = config.get("weather", {})
+    if weather_config.get("provider", "pirateweather") == "homeassistant":
+        watched.add(weather_config.get("entity_id", "weather.home"))
+        watched.add("sun.sun")
+    return watched
+
+
+def _cache_to_render_data(cache, config):
+    """Convert the entity state cache into sensor_data + weather_data dicts."""
+    sensors = config["home_assistant"]["sensors"]
+    sensor_data = {}
+    for metric, entity_id in sensors.items():
+        entry = cache.get(entity_id)
+        if entry is None:
+            sensor_data[metric] = "0"
+            continue
+        state = entry.get("state", "0")
+        sensor_data[metric] = "0" if state in ("unavailable", "unknown") else state
+
+    # Weather data
+    weather_config = config.get("weather", {})
+    provider = weather_config.get("provider", "pirateweather")
+
+    if provider == "homeassistant":
+        weather_entity = weather_config.get("entity_id", "weather.home")
+        w_entry = cache.get(weather_entity, {})
+        condition = w_entry.get("state", "sunny")
+        if condition in ("unavailable", "unknown"):
+            condition = "sunny"
+
+        sun_entry = cache.get("sun.sun", {})
+        is_night = sun_entry.get("state") == "below_horizon"
+
+        attrs = w_entry.get("attributes", {})
+        temp = attrs.get("temperature")
+
+        if is_night and condition in HA_NIGHT_OVERRIDES:
+            icon = HA_NIGHT_OVERRIDES[condition]
+        else:
+            icon = HA_CONDITION_MAP.get(condition, "cloudy")
+
+        if temp is not None:
+            temp = str(int(round(float(temp))))
+        else:
+            temp = ""
+
+        weather_data = {"icon": icon, "temperature": temp, "is_night": str(is_night).lower()}
+    else:
+        # Pirate Weather: not available via WS, use cached REST result
+        weather_data = cache.get("_weather_pirate", {"icon": "clear-day", "temperature": "", "is_night": "false"})
+
+    return sensor_data, weather_data
+
+
+def _do_render_push(cache, config):
+    """Render and push using cached state."""
+    sensor_data, weather_data = _cache_to_render_data(cache, config)
+    logger.info("WS render: sensors=%s weather=%s", sensor_data, weather_data)
+
+    webp_path = render_pixlet(sensor_data, weather_data)
+    if webp_path is None:
+        logger.error("Render failed, skipping push")
+        return
+    push_to_tidbyt(webp_path, config)
+
+
+def _initial_fetch_to_cache(config):
+    """Do a full REST fetch and populate the cache. Returns cache dict."""
+    cache = {}
+    session = _build_ha_session(config)
+
+    # Fetch all sensor entities
+    for entity_id in config["home_assistant"]["sensors"].values():
+        try:
+            data = fetch_ha_entity(session, entity_id)
+            cache[entity_id] = {"state": data.get("state", "0"), "attributes": data.get("attributes", {})}
+        except requests.RequestException as e:
+            logger.error("Initial fetch %s failed: %s", entity_id, e)
+            cache[entity_id] = {"state": "0", "attributes": {}}
+
+    # Fetch weather + sun entities if using HA weather
+    weather_config = config.get("weather", {})
+    if weather_config.get("provider", "pirateweather") == "homeassistant":
+        for eid in [weather_config.get("entity_id", "weather.home"), "sun.sun"]:
+            try:
+                data = fetch_ha_entity(session, eid)
+                cache[eid] = {"state": data.get("state", ""), "attributes": data.get("attributes", {})}
+            except requests.RequestException as e:
+                logger.error("Initial fetch %s failed: %s", eid, e)
+                cache[eid] = {"state": "", "attributes": {}}
+    else:
+        # Pirate Weather: fetch once via REST, store in cache
+        cache["_weather_pirate"] = fetch_weather_pirate(config)
+
+    session.close()
+    return cache
+
+
+async def _ws_authenticate(ws, token):
+    """Handle HA WebSocket authentication handshake."""
+    msg = json.loads(await ws.recv())
+    if msg.get("type") != "auth_required":
+        raise RuntimeError(f"Expected auth_required, got {msg.get('type')}")
+
+    await ws.send(json.dumps({"type": "auth", "access_token": token}))
+
+    msg = json.loads(await ws.recv())
+    if msg.get("type") == "auth_ok":
+        logger.info("WebSocket authenticated (HA %s)", msg.get("ha_version", "?"))
+        return
+    raise RuntimeError(f"Auth failed: {msg}")
+
+
+async def _ws_subscribe(ws):
+    """Subscribe to state_changed events. Returns subscription ID."""
+    sub_id = 1
+    await ws.send(json.dumps({
+        "type": "subscribe_events",
+        "event_type": "state_changed",
+        "id": sub_id,
+    }))
+    msg = json.loads(await ws.recv())
+    if msg.get("success"):
+        logger.info("Subscribed to state_changed events (id=%d)", sub_id)
+    else:
+        raise RuntimeError(f"Subscribe failed: {msg}")
+    return sub_id
+
+
+async def ws_loop(config):
+    """Main WebSocket event loop with auto-reconnect."""
+    ha_config = config["home_assistant"]
+    ha_url = ha_config["url"].rstrip("/")
+    token = ha_config["token"]
+    watched = _build_watched_entities(config)
+    min_push_interval = 5  # seconds
+
+    # Use ws:// or wss:// matching http:// or https://
+    ws_url = ha_url.replace("http://", "ws://").replace("https://", "wss://") + "/api/websocket"
+
+    backoff = 2
+    max_backoff = 30
+
+    while True:
+        # Initial REST fetch + render + push
+        logger.info("--- WebSocket mode: initial REST fetch ---")
+        cache = _initial_fetch_to_cache(config)
+        _do_render_push(cache, config)
+        last_push = time.monotonic()
+
+        try:
+            logger.info("Connecting to %s", ws_url)
+            async with websockets.connect(ws_url) as ws:
+                await _ws_authenticate(ws, token)
+                await _ws_subscribe(ws)
+                backoff = 2  # reset on successful connection
+
+                pending_update = False
+                async for raw in ws:
+                    msg = json.loads(raw)
+                    if msg.get("type") != "event":
+                        continue
+
+                    event_data = msg.get("event", {}).get("data", {})
+                    entity_id = event_data.get("entity_id")
+                    if entity_id not in watched:
+                        continue
+
+                    new_state = event_data.get("new_state", {})
+                    cache[entity_id] = {
+                        "state": new_state.get("state", ""),
+                        "attributes": new_state.get("attributes", {}),
+                    }
+                    logger.info("WS update: %s = %s", entity_id, new_state.get("state"))
+
+                    # Throttled render + push
+                    elapsed = time.monotonic() - last_push
+                    if elapsed >= min_push_interval:
+                        _do_render_push(cache, config)
+                        last_push = time.monotonic()
+                        pending_update = False
+                    else:
+                        pending_update = True
+
+                # If we exit the loop with pending updates, flush them
+                if pending_update:
+                    _do_render_push(cache, config)
+
+        except (websockets.ConnectionClosed, ConnectionRefusedError, OSError) as e:
+            logger.warning("WebSocket disconnected: %s. Retrying in %ds...", e, backoff)
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, max_backoff)
+        except RuntimeError as e:
+            if "Auth failed" in str(e):
+                logger.error("WebSocket auth failed — check your HA token. Exiting.")
+                sys.exit(1)
+            logger.error("WebSocket error: %s. Retrying in %ds...", e, backoff)
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, max_backoff)
+
+
 def main():
     config = load_config()
-    interval = config.get("schedule", {}).get("interval_seconds", 15)
+    mode = config.get("schedule", {}).get("mode", "polling")
     once = "--once" in sys.argv
 
     if once:
         success = run_once(config)
         sys.exit(0 if success else 1)
 
-    logger.info("Starting loop with %ds interval", interval)
-    while True:
-        try:
-            run_once(config)
-        except Exception:
-            logger.exception("Unexpected error in update cycle")
+    if mode == "websocket":
+        logger.info("Starting WebSocket real-time mode")
+        asyncio.run(ws_loop(config))
+    else:
+        interval = config.get("schedule", {}).get("interval_seconds", 15)
+        logger.info("Starting polling loop with %ds interval", interval)
+        while True:
+            try:
+                run_once(config)
+            except Exception:
+                logger.exception("Unexpected error in update cycle")
 
-        logger.info("Sleeping %ds until next update", interval)
-        time.sleep(interval)
+            logger.info("Sleeping %ds until next update", interval)
+            time.sleep(interval)
 
 
 if __name__ == "__main__":
