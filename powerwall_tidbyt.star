@@ -124,12 +124,12 @@ def main(config):
         main_align = "space_between",
         cross_align = "center",
         children = [
-            render.Box(width = 21, height = 16, child = render.Row(
+            render.Box(width = 24, height = 16, child = render.Row(
                 main_align = "center",
                 children = [render.Image(src = HOUSE)],
             )),
             render.Text(content = load_text, height = 8, font = "tb-8", color = load_color),
-            build_battery_bar(battery_pct),
+            render.Box(height = 8, child = build_battery_bar(battery_pct)),
         ],
     )
 
@@ -156,7 +156,7 @@ def main(config):
         main_align = "space_between",
         cross_align = "center",
         children = [
-            render.Box(width = 21, height = 16, child = render.Row(
+            render.Box(width = 20, height = 16, child = render.Row(
                 main_align = "center",
                 children = [grid_icon],
             )),
@@ -166,17 +166,18 @@ def main(config):
     )
 
     # Energy flow dots row (dots are 10px wide, centered at column boundaries)
-    dots = [render.Box(width = 17)]
+    # Col boundaries: col1|col2 at x=20, col2|col3 at x=44
+    dots = [render.Box(width = 15)]
 
-    # Solar -> Home flow dots (centered at x=22)
+    # Solar -> Home flow dots (centered at x=20)
     if solar_flow:
         dots.append(render.Image(src = DOTS_LTR))
     else:
         dots.append(render.Box(width = 10))
 
-    dots.append(render.Box(width = 10))
+    dots.append(render.Box(width = 14))
 
-    # Grid <-> Home flow dots (centered at x=42)
+    # Grid <-> Home flow dots (centered at x=44)
     if grid_flow == -1:
         dots.append(render.Image(src = DOTS_RTL))
     elif grid_flow == 1:
@@ -257,10 +258,10 @@ def build_battery_bar(battery_pct):
         ],
     )
 
-# --- Weather icons for column 1 (21x16 area) ---
+# --- Weather icons for column 1 (20x16 area) ---
 
 def build_weather_icon(weather_icon):
-    """Build a 21x16 weather widget for the solar column when solar=0."""
+    """Build a 20x16 weather widget for the solar column when solar=0."""
     if weather_icon == "clear-night":
         return _moon_and_stars()
     elif weather_icon == "rain" or weather_icon == "sleet":
@@ -304,9 +305,9 @@ def _cloud_shape(color = CLOUD_COLOR, w = 10, h = 3):
     ])
 
 def _moon_and_stars():
-    """Pixel-art crescent moon with twinkling stars in 21x16 area."""
+    """Pixel-art crescent moon with twinkling stars in 20x16 area."""
     return render.Box(
-        width = 21,
+        width = 20,
         height = 16,
         child = render.Stack(
             children = [
@@ -327,7 +328,7 @@ def _moon_and_stars():
 def _moon_and_cloud():
     """Crescent moon with a small drifting cloud."""
     return render.Box(
-        width = 21,
+        width = 20,
         height = 16,
         child = render.Stack(
             children = [
@@ -357,7 +358,7 @@ def _moon_and_cloud():
     )
 
 def _rain_icon():
-    """Rain drops falling within 21x16 area."""
+    """Rain drops falling within 20x16 area."""
     drops = []
     for x, delay in zip([3, 10, 17], [0, 5, 2]):
         drops.append(
@@ -380,10 +381,10 @@ def _rain_icon():
     # Cloud at top
     drops.append(render.Padding(pad = (4, 0, 0, 0), child = _cloud_shape()))
 
-    return render.Box(width = 21, height = 16, child = render.Stack(children = drops))
+    return render.Box(width = 20, height = 16, child = render.Stack(children = drops))
 
 def _snow_icon():
-    """Snowflakes drifting within 21x16 area."""
+    """Snowflakes drifting within 20x16 area."""
     flakes = []
     for x, delay in zip([2, 10, 16], [0, 6, 3]):
         flakes.append(
@@ -407,12 +408,12 @@ def _snow_icon():
     # Cloud at top
     flakes.append(render.Padding(pad = (4, 0, 0, 0), child = _cloud_shape()))
 
-    return render.Box(width = 21, height = 16, child = render.Stack(children = flakes))
+    return render.Box(width = 20, height = 16, child = render.Stack(children = flakes))
 
 def _cloud_icon():
-    """Drifting clouds within 21x16 area."""
+    """Drifting clouds within 20x16 area."""
     return render.Box(
-        width = 21,
+        width = 20,
         height = 16,
         child = render.Stack(
             children = [
@@ -445,7 +446,7 @@ def _cloud_icon():
     )
 
 def _wind_icon():
-    """Horizontal wind streaks within 21x16 area."""
+    """Horizontal wind streaks within 20x16 area."""
     streaks = []
     for y, delay in zip([3, 8, 13], [0, 2, 1]):
         streaks.append(
@@ -465,10 +466,10 @@ def _wind_icon():
             ),
         )
 
-    return render.Box(width = 21, height = 16, child = render.Stack(children = streaks))
+    return render.Box(width = 20, height = 16, child = render.Stack(children = streaks))
 
 def _fog_icon():
-    """Gray haze drifting within 21x16 area."""
+    """Gray haze drifting within 20x16 area."""
     haze = []
     haze_y = [4, 9, 13]
 
@@ -490,7 +491,7 @@ def _fog_icon():
             ),
         )
 
-    return render.Box(width = 21, height = 16, child = render.Stack(children = haze))
+    return render.Box(width = 20, height = 16, child = render.Stack(children = haze))
 
 def format_power(watts):
     """Format wattage as compact kW: 0W->'0', 676W->'.7', 1920W->'1.9'"""
