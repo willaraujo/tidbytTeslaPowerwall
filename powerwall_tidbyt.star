@@ -6,7 +6,6 @@ Author: willaraujo
 """
 
 load("encoding/base64.star", "base64")
-load("math.star", "math")
 load("render.star", "render")
 load("animation.star", "animation")
 
@@ -58,7 +57,6 @@ RAIN_COLOR = "#4488CC"
 SNOW_COLOR = "#CCDDFF"
 SUN_GLOW_COLOR = "#332200"
 STAR_COLOR = "#FFFFFF"
-CLOUD_COLOR = "#444444"
 WIND_COLOR = "#667788"
 
 def main(config):
@@ -405,16 +403,9 @@ def night_animation():
 
     return render.Stack(children = stars)
 
-def cloud_animation():
-    """Multiple cloud shapes drifting at different heights and speeds."""
+def _build_clouds(cloud_defs):
+    """Render drifting cloud shapes from a list of (y, width, height, duration, delay, color)."""
     clouds = []
-    # Cloud clusters: (y_position, width, height, speed_duration, delay, color)
-    cloud_defs = [
-        (1, 10, 3, 90, 0, "#3a3a3a"),
-        (5, 6, 2, 70, 30, "#444444"),
-        (26, 8, 2, 85, 50, "#3a3a3a"),
-    ]
-
     for cloud_def in cloud_defs:
         y, w, h, dur, delay, color = cloud_def[0], cloud_def[1], cloud_def[2], cloud_def[3], cloud_def[4], cloud_def[5]
         clouds.append(
@@ -448,57 +439,26 @@ def cloud_animation():
                 ],
             ),
         )
-
     return render.Stack(children = clouds)
+
+def cloud_animation():
+    """Multiple cloud shapes drifting at different heights and speeds."""
+    return _build_clouds([
+        (1, 10, 3, 90, 0, "#3a3a3a"),
+        (5, 6, 2, 70, 30, "#444444"),
+        (26, 8, 2, 85, 50, "#3a3a3a"),
+    ])
 
 def overcast_animation():
     """Heavy cloud cover -- more clouds, darker, multiple layers."""
-    clouds = []
-    # Dense cloud layer: (y, width, height, duration, delay, color)
-    cloud_defs = [
+    return _build_clouds([
         (0, 12, 3, 100, 0, "#333333"),
         (2, 8, 2, 75, 15, "#3a3a3a"),
         (4, 10, 3, 90, 40, "#2e2e2e"),
         (14, 7, 2, 80, 25, "#333333"),
         (24, 9, 3, 85, 10, "#2e2e2e"),
         (27, 6, 2, 70, 50, "#3a3a3a"),
-    ]
-
-    for cloud_def in cloud_defs:
-        y, w, h, dur, delay, color = cloud_def[0], cloud_def[1], cloud_def[2], cloud_def[3], cloud_def[4], cloud_def[5]
-        clouds.append(
-            animation.Transformation(
-                child = render.Padding(
-                    pad = (0, y, 0, 0),
-                    child = render.Row(
-                        children = [
-                            render.Box(width = w, height = h, color = color),
-                            render.Padding(
-                                pad = (0, 1, 0, 0),
-                                child = render.Box(width = int(w / 2), height = max(h - 1, 1), color = color),
-                            ),
-                        ],
-                    ),
-                ),
-                duration = dur,
-                delay = delay,
-                direction = "normal",
-                fill_mode = "forwards",
-                keyframes = [
-                    animation.Keyframe(
-                        percentage = 0.0,
-                        transforms = [animation.Translate(-15, 0)],
-                        curve = "linear",
-                    ),
-                    animation.Keyframe(
-                        percentage = 1.0,
-                        transforms = [animation.Translate(70, 0)],
-                    ),
-                ],
-            ),
-        )
-
-    return render.Stack(children = clouds)
+    ])
 
 def partly_cloudy_day_animation():
     """Sun glow with a single small cloud drifting through."""

@@ -50,48 +50,43 @@ def load_config():
     return config
 
 
-def fetch_ha_sensor(session, ha_url, token, entity_id):
-    """Fetch a single sensor state from Home Assistant REST API."""
-    url = f"{ha_url.rstrip('/')}/api/states/{entity_id}"
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-    }
-
-    resp = session.get(url, headers=headers, timeout=10)
-    resp.raise_for_status()
-    data = resp.json()
-    state = data.get("state", "unavailable")
-
-    if state in ("unavailable", "unknown"):
-        logger.warning("Sensor %s is %s", entity_id, state)
-        return None
-
-    return state
-
-
-def fetch_all_sensors(config):
-    """Fetch all Powerwall sensors from HA. Returns dict of metric -> value."""
+def _build_ha_session(config):
+    """Build a requests.Session with HA auth headers pre-configured."""
     ha_config = config["home_assistant"]
-    ha_url = ha_config["url"]
-    token = ha_config["token"]
-    sensors = ha_config["sensors"]
-
-    results = {}
     session = requests.Session()
+    session.headers.update({
+        "Authorization": f"Bearer {ha_config['token']}",
+        "Content-Type": "application/json",
+    })
+    session.ha_url = ha_config["url"].rstrip("/")
+    return session
+
+
+def fetch_ha_entity(session, entity_id):
+    """Fetch a single entity state from Home Assistant REST API."""
+    resp = session.get(f"{session.ha_url}/api/states/{entity_id}", timeout=10)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def fetch_all_sensors(session, config):
+    """Fetch all Powerwall sensors from HA. Returns dict of metric -> value."""
+    sensors = config["home_assistant"]["sensors"]
+    results = {}
 
     for metric, entity_id in sensors.items():
         try:
-            state = fetch_ha_sensor(session, ha_url, token, entity_id)
-            if state is not None:
-                results[metric] = state
-            else:
+            data = fetch_ha_entity(session, entity_id)
+            state = data.get("state", "unavailable")
+            if state in ("unavailable", "unknown"):
+                logger.warning("Sensor %s is %s", entity_id, state)
                 results[metric] = "0"
+            else:
+                results[metric] = state
         except requests.RequestException as e:
             logger.error("Failed to fetch %s (%s): %s", metric, entity_id, e)
             results[metric] = "0"
 
-    session.close()
     return results
 
 
@@ -100,7 +95,7 @@ def fetch_all_sensors(config):
 HA_CONDITION_MAP = {
     "sunny": "clear-day",
     "clear-night": "clear-night",
-    "partlycloudy": "partly-cloudy-day",    # day/night resolved below
+    "partlycloudy": "partly-cloudy-day",
     "cloudy": "cloudy",
     "rainy": "rain",
     "pouring": "rain",
@@ -116,43 +111,30 @@ HA_CONDITION_MAP = {
 }
 
 
-def fetch_weather(config):
+def fetch_weather(session, config):
     """Fetch weather using the configured provider."""
     weather_config = config.get("weather", {})
     provider = weather_config.get("provider", "pirateweather")
 
     if provider == "homeassistant":
-        return fetch_weather_ha(config)
+        return fetch_weather_ha(session, config)
     return fetch_weather_pirate(config)
 
 
-def fetch_weather_ha(config):
+def fetch_weather_ha(session, config):
     """Fetch current weather from a Home Assistant weather entity (e.g. Met.no)."""
-    ha_config = config["home_assistant"]
-    ha_url = ha_config["url"].rstrip("/")
-    token = ha_config["token"]
-    weather_config = config.get("weather", {})
-    entity_id = weather_config.get("entity_id", "weather.home")
-
-    url = f"{ha_url}/api/states/{entity_id}"
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-    }
+    entity_id = config.get("weather", {}).get("entity_id", "weather.home")
 
     try:
-        resp = requests.get(url, headers=headers, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-
+        data = fetch_ha_entity(session, entity_id)
         condition = data.get("state", "sunny")
+
         if condition in ("unavailable", "unknown"):
             logger.warning("Weather entity %s is %s", entity_id, condition)
             return {"icon": "clear-day", "temperature": ""}
 
         attrs = data.get("attributes", {})
         temp = attrs.get("temperature")
-
         icon = HA_CONDITION_MAP.get(condition, "cloudy")
 
         if temp is not None:
@@ -258,13 +240,18 @@ def run_once(config):
     """Single fetch-render-push cycle."""
     logger.info("--- Starting update cycle ---")
 
+    # Reuse one session for all HA requests (sensors + weather)
+    session = _build_ha_session(config)
+
     # Fetch sensor data from HA
-    sensor_data = fetch_all_sensors(config)
+    sensor_data = fetch_all_sensors(session, config)
     logger.info("Sensor data: %s", sensor_data)
 
-    # Fetch weather
-    weather_data = fetch_weather(config)
+    # Fetch weather (reuses session if provider is homeassistant)
+    weather_data = fetch_weather(session, config)
     logger.info("Weather: %s", weather_data)
+
+    session.close()
 
     # Render via Pixlet
     webp_path = render_pixlet(sensor_data, weather_data)
