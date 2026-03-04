@@ -30,6 +30,9 @@ WEBP_OUTPUT = SCRIPT_DIR / "powerwall_tidbyt.webp"
 TIDBYT_API_BASE = "https://api.tidbyt.com/v0/devices"
 PIRATE_WEATHER_URL = "https://api.pirateweather.net/forecast"
 
+# Default weather data returned when weather fetch fails or is unavailable
+DEFAULT_WEATHER = {"icon": "clear-day", "temperature": "", "is_night": "false", "cloud_cover": "0"}
+
 
 def load_config():
     """Load config from YAML file. Path can be overridden via CONFIG_PATH env var."""
@@ -154,7 +157,7 @@ def fetch_weather_ha(session, config):
 
         if condition in ("unavailable", "unknown"):
             logger.warning("Weather entity %s is %s", entity_id, condition)
-            return {"icon": "clear-day", "temperature": "", "is_night": "false", "cloud_cover": "0"}
+            return dict(DEFAULT_WEATHER)
 
         is_night = _is_night_ha(session)
 
@@ -180,7 +183,7 @@ def fetch_weather_ha(session, config):
         return {"icon": icon, "temperature": temp, "is_night": str(is_night).lower(), "cloud_cover": str(int(cloud_cover))}
     except requests.RequestException as e:
         logger.error("Failed to fetch HA weather (%s): %s", entity_id, e)
-        return {"icon": "clear-day", "temperature": "", "is_night": "false", "cloud_cover": "0"}
+        return dict(DEFAULT_WEATHER)
 
 
 def fetch_weather_pirate(config):
@@ -192,7 +195,7 @@ def fetch_weather_pirate(config):
 
     if not api_key:
         logger.warning("No Pirate Weather API key configured, skipping weather")
-        return {"icon": "clear-day", "temperature": "", "is_night": "false", "cloud_cover": "0"}
+        return dict(DEFAULT_WEATHER)
 
     url = f"{PIRATE_WEATHER_URL}/{api_key}/{lat},{lon}"
     params = {"units": "us", "exclude": "minutely,hourly,daily,alerts"}
@@ -212,7 +215,7 @@ def fetch_weather_pirate(config):
         return {"icon": icon, "temperature": temp, "is_night": str(is_night).lower(), "cloud_cover": str(int(cloud_cover * 100))}
     except requests.RequestException as e:
         logger.error("Failed to fetch weather: %s", e)
-        return {"icon": "clear-day", "temperature": "", "is_night": "false", "cloud_cover": "0"}
+        return dict(DEFAULT_WEATHER)
 
 
 def render_pixlet(sensor_data, weather_data, config=None):
@@ -277,8 +280,8 @@ def push_to_tidbyt(webp_path, config):
 
     resp = requests.post(url, json=payload, headers=headers, timeout=15)
 
-    if resp.status_code == 200:
-        logger.info("Pushed to Tidbyt successfully")
+    if 200 <= resp.status_code < 300:
+        logger.info("Pushed to Tidbyt successfully (%d)", resp.status_code)
     else:
         logger.error("Tidbyt push failed (%d): %s", resp.status_code, resp.text)
 
@@ -367,7 +370,7 @@ def _cache_to_render_data(cache, config):
         weather_data = {"icon": icon, "temperature": temp, "is_night": str(is_night).lower()}
     else:
         # Pirate Weather: not available via WS, use cached REST result
-        weather_data = cache.get("_weather_pirate", {"icon": "clear-day", "temperature": "", "is_night": "false", "cloud_cover": "0"})
+        weather_data = cache.get("_weather_pirate", dict(DEFAULT_WEATHER))
 
     return sensor_data, weather_data
 
