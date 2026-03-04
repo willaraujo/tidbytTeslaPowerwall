@@ -23,6 +23,12 @@ tidbyt:
   api_token: "your_tidbyt_api_token"
   installation_id: "powerwall"
 
+## Seasonal easter eggs: set override to force a holiday theme for testing
+## Options: "christmas", "july4", "halloween", "thanksgiving"
+## Leave blank or omit for automatic date-based detection
+seasonal:
+  override: ""
+
 ## Update mode: "websocket" (real-time via HA WebSocket) or "polling" (REST every N seconds)
 schedule:
   mode: "websocket"

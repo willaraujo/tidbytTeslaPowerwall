@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 import requests
@@ -209,8 +210,13 @@ def fetch_weather_pirate(config):
         return {"icon": "clear-day", "temperature": "", "is_night": "false"}
 
 
-def render_pixlet(sensor_data, weather_data):
+def render_pixlet(sensor_data, weather_data, config=None):
     """Invoke pixlet render with sensor data as config params. Returns path to .webp."""
+    now = datetime.now()
+    seasonal = ""
+    if config:
+        seasonal = config.get("seasonal", {}).get("override", "")
+
     cmd = [
         "pixlet", "render", str(STAR_FILE),
         "-o", str(WEBP_OUTPUT),
@@ -222,6 +228,9 @@ def render_pixlet(sensor_data, weather_data):
         f"weather_icon={weather_data.get('icon', 'clear-day')}",
         f"temperature={weather_data.get('temperature', '')}",
         f"is_night={weather_data.get('is_night', 'false')}",
+        f"month={now.month}",
+        f"day={now.day}",
+        f"seasonal={seasonal}",
     ]
 
     logger.info("Running: %s", " ".join(cmd))
@@ -286,7 +295,7 @@ def run_once(config):
     session.close()
 
     # Render via Pixlet
-    webp_path = render_pixlet(sensor_data, weather_data)
+    webp_path = render_pixlet(sensor_data, weather_data, config)
     if webp_path is None:
         logger.error("Render failed, skipping push")
         return False
@@ -362,7 +371,7 @@ def _do_render_push(cache, config):
     sensor_data, weather_data = _cache_to_render_data(cache, config)
     logger.info("WS render: sensors=%s weather=%s", sensor_data, weather_data)
 
-    webp_path = render_pixlet(sensor_data, weather_data)
+    webp_path = render_pixlet(sensor_data, weather_data, config)
     if webp_path is None:
         logger.error("Render failed, skipping push")
         return
