@@ -304,6 +304,8 @@ def build_house_icon(seasonal = ""):
     # Seasonal house decorations (same coordinate system — moves with house)
     if seasonal == "christmas":
         children.extend(_house_christmas_decor())
+    elif seasonal == "halloween":
+        children.extend(_house_halloween_decor())
 
     return render.Box(width = 16, height = 16, child = render.Stack(children = children))
 
@@ -428,6 +430,8 @@ def build_right_scene(seasonal):
     """Right margin scene item (4x16 box). Independent of house."""
     if seasonal == "christmas":
         return _build_snowman()
+    elif seasonal == "halloween":
+        return _build_ghost()
     return render.Box(width = 4, height = 16)
 
 def build_full_overlay(seasonal):
@@ -483,6 +487,55 @@ def _house_christmas_decor():
         # Twinkling lights below eave
         twinkling_a,
         twinkling_b,
+    ]
+
+def _house_halloween_decor():
+    """Spooky purple/orange flickering lights + spiderweb — house coords."""
+    # Flickering orange and purple lights along eave (y=8, below roof)
+    lights_a = render.Stack(children = [
+        render.Padding(pad = (3, 8, 0, 0), child = render.Box(width = 1, height = 1, color = "#ff6600")),
+        render.Padding(pad = (7, 8, 0, 0), child = render.Box(width = 1, height = 1, color = "#ff6600")),
+        render.Padding(pad = (11, 8, 0, 0), child = render.Box(width = 1, height = 1, color = "#ff6600")),
+    ])
+    lights_b = render.Stack(children = [
+        render.Padding(pad = (5, 8, 0, 0), child = render.Box(width = 1, height = 1, color = "#8800cc")),
+        render.Padding(pad = (9, 8, 0, 0), child = render.Box(width = 1, height = 1, color = "#8800cc")),
+    ])
+
+    flicker_a = animation.Transformation(
+        child = lights_a,
+        duration = 6,
+        delay = 0,
+        direction = "alternate",
+        fill_mode = "forwards",
+        keyframes = [
+            animation.Keyframe(percentage = 0.0, transforms = [animation.Scale(1.0, 1.0)], curve = "ease_in_out"),
+            animation.Keyframe(percentage = 1.0, transforms = [animation.Scale(0.0, 0.0)]),
+        ],
+    )
+    flicker_b = animation.Transformation(
+        child = lights_b,
+        duration = 6,
+        delay = 3,
+        direction = "alternate",
+        fill_mode = "forwards",
+        keyframes = [
+            animation.Keyframe(percentage = 0.0, transforms = [animation.Scale(1.0, 1.0)], curve = "ease_in_out"),
+            animation.Keyframe(percentage = 1.0, transforms = [animation.Scale(0.0, 0.0)]),
+        ],
+    )
+
+    return [
+        # Spiderweb on upper-left corner of house (roof/wall junction)
+        render.Padding(pad = (2, 7, 0, 0), child = render.Box(width = 1, height = 1, color = "#666666")),
+        render.Padding(pad = (3, 8, 0, 0), child = render.Box(width = 1, height = 1, color = "#555555")),
+        render.Padding(pad = (2, 8, 0, 0), child = render.Box(width = 1, height = 1, color = "#555555")),
+        render.Padding(pad = (2, 9, 0, 0), child = render.Box(width = 1, height = 1, color = "#444444")),
+        # Spooky window glow (replace blue with eerie green)
+        render.Padding(pad = (4, 9, 0, 0), child = render.Box(width = 3, height = 3, color = "#44ff44")),
+        # Flickering orange + purple lights
+        flicker_a,
+        flicker_b,
     ]
 
 # --- Self-contained scene items (all coords relative to own 4x16 box) ---
@@ -560,6 +613,25 @@ def _build_turkey():
             # Head + wattle
             render.Padding(pad = (3, 11, 0, 0), child = render.Box(width = 1, height = 1, color = "#884422")),
             render.Padding(pad = (3, 12, 0, 0), child = render.Box(width = 1, height = 1, color = "#cc0000")),
+        ]),
+    )
+
+def _build_ghost():
+    """Spooky ghost in 4x16 box."""
+    return render.Box(
+        width = 4,
+        height = 16,
+        child = render.Stack(children = [
+            # Head (rounded top)
+            render.Padding(pad = (1, 8, 0, 0), child = render.Box(width = 2, height = 1, color = "#dddddd")),
+            # Body
+            render.Padding(pad = (0, 9, 0, 0), child = render.Box(width = 4, height = 3, color = "#dddddd")),
+            # Eyes
+            render.Padding(pad = (0, 10, 0, 0), child = render.Box(width = 1, height = 1, color = "#000000")),
+            render.Padding(pad = (2, 10, 0, 0), child = render.Box(width = 1, height = 1, color = "#000000")),
+            # Wavy bottom (alternating pixels)
+            render.Padding(pad = (0, 12, 0, 0), child = render.Box(width = 1, height = 1, color = "#dddddd")),
+            render.Padding(pad = (2, 12, 0, 0), child = render.Box(width = 1, height = 1, color = "#dddddd")),
         ]),
     )
 
