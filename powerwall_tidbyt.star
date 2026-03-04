@@ -176,7 +176,7 @@ def main(config):
     )
 
     return render.Root(
-        delay = 100,
+        delay = 200,
         child = display,
     )
 
@@ -225,7 +225,7 @@ def _moon_and_stars():
                     pad = (3, 2, 0, 0),
                     child = animation.Transformation(
                         child = render.Box(width = 1, height = 1, color = STAR_COLOR),
-                        duration = 50,
+                        duration = 25,
                         delay = 0,
                         direction = "alternate",
                         fill_mode = "forwards",
@@ -240,8 +240,8 @@ def _moon_and_stars():
                     pad = (16, 6, 0, 0),
                     child = animation.Transformation(
                         child = render.Box(width = 1, height = 1, color = STAR_COLOR),
-                        duration = 50,
-                        delay = 25,
+                        duration = 25,
+                        delay = 12,
                         direction = "alternate",
                         fill_mode = "forwards",
                         keyframes = [
@@ -255,8 +255,8 @@ def _moon_and_stars():
                     pad = (5, 12, 0, 0),
                     child = animation.Transformation(
                         child = render.Box(width = 1, height = 1, color = STAR_COLOR),
-                        duration = 50,
-                        delay = 15,
+                        duration = 25,
+                        delay = 7,
                         direction = "alternate",
                         fill_mode = "forwards",
                         keyframes = [
@@ -296,7 +296,7 @@ def _moon_and_cloud():
                             ],
                         ),
                     ),
-                    duration = 80,
+                    duration = 40,
                     delay = 0,
                     direction = "normal",
                     fill_mode = "forwards",
@@ -313,7 +313,7 @@ def _rain_icon():
     """Rain drops falling within 21x16 area."""
     drops = []
     drop_x = [3, 10, 17]
-    drop_delays = [0, 10, 5]
+    drop_delays = [0, 5, 2]
 
     for i in range(len(drop_x)):
         drops.append(
@@ -321,7 +321,7 @@ def _rain_icon():
                 pad = (drop_x[i], 0, 0, 0),
                 child = animation.Transformation(
                     child = render.Box(width = 1, height = 2, color = RAIN_COLOR),
-                    duration = 25,
+                    duration = 12,
                     delay = drop_delays[i],
                     direction = "normal",
                     fill_mode = "forwards",
@@ -352,7 +352,7 @@ def _snow_icon():
     """Snowflakes drifting within 21x16 area."""
     flakes = []
     flake_x = [2, 10, 16]
-    flake_delays = [0, 12, 6]
+    flake_delays = [0, 6, 3]
 
     for i in range(len(flake_x)):
         flakes.append(
@@ -360,7 +360,7 @@ def _snow_icon():
                 pad = (flake_x[i], 0, 0, 0),
                 child = animation.Transformation(
                     child = render.Box(width = 1, height = 1, color = SNOW_COLOR),
-                    duration = 40,
+                    duration = 20,
                     delay = flake_delays[i],
                     direction = "normal",
                     fill_mode = "forwards",
@@ -406,7 +406,7 @@ def _cloud_icon():
                             ],
                         ),
                     ),
-                    duration = 70,
+                    duration = 35,
                     delay = 0,
                     direction = "normal",
                     fill_mode = "forwards",
@@ -426,8 +426,8 @@ def _cloud_icon():
                             ],
                         ),
                     ),
-                    duration = 55,
-                    delay = 20,
+                    duration = 28,
+                    delay = 10,
                     direction = "normal",
                     fill_mode = "forwards",
                     keyframes = [
@@ -443,7 +443,7 @@ def _wind_icon():
     """Horizontal wind streaks within 21x16 area."""
     streaks = []
     streak_y = [3, 8, 13]
-    streak_delays = [0, 4, 2]
+    streak_delays = [0, 2, 1]
 
     for i in range(len(streak_y)):
         streaks.append(
@@ -452,7 +452,7 @@ def _wind_icon():
                     pad = (0, streak_y[i], 0, 0),
                     child = render.Box(width = 5, height = 1, color = WIND_COLOR),
                 ),
-                duration = 12,
+                duration = 6,
                 delay = streak_delays[i],
                 direction = "normal",
                 fill_mode = "forwards",
@@ -477,8 +477,8 @@ def _fog_icon():
                     pad = (0, y, 0, 0),
                     child = render.Box(width = 10, height = 2, color = FOG_COLOR),
                 ),
-                duration = 60,
-                delay = y * 3,
+                duration = 30,
+                delay = y,
                 direction = "alternate",
                 fill_mode = "forwards",
                 keyframes = [
