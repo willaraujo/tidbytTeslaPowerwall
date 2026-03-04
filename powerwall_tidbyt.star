@@ -129,7 +129,10 @@ def main(config):
                 children = [render.Image(src = HOUSE)],
             )),
             render.Text(content = load_text, height = 8, font = "tb-8", color = load_color),
-            render.Box(height = 8, child = build_battery_bar(battery_pct)),
+            render.Box(height = 8, child = render.Padding(
+                pad = (0, 3, 0, 0),
+                child = build_battery_bar(battery_pct),
+            )),
         ],
     )
 
@@ -198,7 +201,7 @@ def main(config):
             ),
             render.Column(
                 children = [
-                    render.Box(height = 8),
+                    render.Box(height = 14),
                     render.Row(expanded = True, children = dots),
                 ],
             ),
@@ -207,7 +210,10 @@ def main(config):
 
     return render.Root(
         delay = 200,
-        child = display,
+        child = render.Padding(
+            pad = (0, 1, 0, 0),
+            child = display,
+        ),
     )
 
 # --- Battery bar (outlined battery icon with gradient segments) ---
