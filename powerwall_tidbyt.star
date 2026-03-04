@@ -405,23 +405,22 @@ def get_seasonal_overlay(config):
     return None
 
 def _christmas_overlay():
-    """Snowman next to house + snow on roof."""
+    """Snow on roof + Christmas lights on house."""
     return render.Stack(
         children = [
-            # Snow on roof (white dots)
-            render.Padding(pad = (5, 3, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffffff")),
-            render.Padding(pad = (7, 2, 0, 0), child = render.Box(width = 2, height = 1, color = "#ffffff")),
-            render.Padding(pad = (10, 3, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffffff")),
-            # Snowman (right side of house area)
-            # Bottom ball
-            render.Padding(pad = (0, 12, 0, 0), child = render.Box(width = 3, height = 3, color = "#ffffff")),
-            # Top ball
-            render.Padding(pad = (0, 10, 0, 0), child = render.Box(width = 3, height = 2, color = "#ffffff")),
-            # Eyes
-            render.Padding(pad = (0, 10, 0, 0), child = render.Box(width = 1, height = 1, color = "#000000")),
-            render.Padding(pad = (2, 10, 0, 0), child = render.Box(width = 1, height = 1, color = "#000000")),
-            # Carrot nose
-            render.Padding(pad = (1, 11, 0, 0), child = render.Box(width = 1, height = 1, color = "#ff8800")),
+            # Snow on roof ridge (white line along roof)
+            render.Padding(pad = (5, 3, 0, 0), child = render.Box(width = 6, height = 1, color = "#ffffff")),
+            render.Padding(pad = (4, 4, 0, 0), child = render.Box(width = 2, height = 1, color = "#ffffff")),
+            render.Padding(pad = (10, 4, 0, 0), child = render.Box(width = 2, height = 1, color = "#ffffff")),
+            # Christmas lights along roof eave (alternating colors)
+            render.Padding(pad = (3, 7, 0, 0), child = render.Box(width = 1, height = 1, color = "#ff0000")),
+            render.Padding(pad = (5, 7, 0, 0), child = render.Box(width = 1, height = 1, color = "#00ff00")),
+            render.Padding(pad = (7, 7, 0, 0), child = render.Box(width = 1, height = 1, color = "#ff0000")),
+            render.Padding(pad = (9, 7, 0, 0), child = render.Box(width = 1, height = 1, color = "#00ff00")),
+            render.Padding(pad = (11, 7, 0, 0), child = render.Box(width = 1, height = 1, color = "#ff0000")),
+            # Wreath on door (green circle with red dot)
+            render.Padding(pad = (9, 10, 0, 0), child = render.Box(width = 3, height = 3, color = "#006600")),
+            render.Padding(pad = (10, 11, 0, 0), child = render.Box(width = 1, height = 1, color = "#ff0000")),
         ],
     )
 
