@@ -31,7 +31,7 @@ TIDBYT_API_BASE = "https://api.tidbyt.com/v0/devices"
 PIRATE_WEATHER_URL = "https://api.pirateweather.net/forecast"
 
 # Default weather data returned when weather fetch fails or is unavailable
-DEFAULT_WEATHER = {"icon": "clear-day", "temperature": "", "is_night": "false", "cloud_cover": "0"}
+DEFAULT_WEATHER = {"icon": "clear-day", "temperature": "", "is_night": "false", "cloud_cover": "0", "sun_elevation": "45"}
 
 
 def load_config():
@@ -112,8 +112,8 @@ HA_CONDITION_MAP = {
     "fog": "fog",
     "windy": "wind",
     "windy-variant": "wind",
-    "lightning": "rain",
-    "lightning-rainy": "rain",
+    "lightning": "thunderstorm",
+    "lightning-rainy": "thunderstorm",
     "exceptional": "cloudy",
 }
 
@@ -128,18 +128,6 @@ def fetch_weather(session, config):
     return fetch_weather_pirate(config)
 
 
-def _is_night_ha(session):
-    """Check HA's sun.sun entity to determine if it's nighttime."""
-    try:
-        data = fetch_ha_entity(session, "sun.sun")
-        is_night = data.get("state") == "below_horizon"
-        logger.info("Sun state: %s (is_night=%s)", data.get("state"), is_night)
-        return is_night
-    except requests.RequestException:
-        logger.warning("Could not fetch sun.sun, assuming daytime")
-        return False
-
-
 # HA conditions that should flip to their night variant when sun is below horizon
 HA_NIGHT_OVERRIDES = {
     "sunny": "clear-night",
@@ -148,7 +136,8 @@ HA_NIGHT_OVERRIDES = {
 
 
 def fetch_weather_ha(session, config):
-    """Fetch current weather from a Home Assistant weather entity (e.g. Met.no)."""
+    """Fetch current weather from a Home Assistant weather entity (e.g. Met.no).
+    Also fetches sun.sun for is_night and sun_elevation."""
     entity_id = config.get("weather", {}).get("entity_id", "weather.home")
 
     try:
@@ -159,7 +148,16 @@ def fetch_weather_ha(session, config):
             logger.warning("Weather entity %s is %s", entity_id, condition)
             return dict(DEFAULT_WEATHER)
 
-        is_night = _is_night_ha(session)
+        # Fetch sun.sun for is_night + elevation
+        is_night = False
+        sun_elevation = 45.0
+        try:
+            sun_data = fetch_ha_entity(session, "sun.sun")
+            is_night = sun_data.get("state") == "below_horizon"
+            sun_elevation = float(sun_data.get("attributes", {}).get("elevation", 0))
+            logger.info("Sun state: %s (is_night=%s, elevation=%.1f)", sun_data.get("state"), is_night, sun_elevation)
+        except requests.RequestException:
+            logger.warning("Could not fetch sun.sun, assuming daytime")
 
         attrs = data.get("attributes", {})
         temp = attrs.get("temperature")
@@ -179,8 +177,12 @@ def fetch_weather_ha(session, config):
         if cloud_cover is None:
             cloud_cover = 0
 
-        logger.info("HA weather: condition=%s icon=%s temp=%s is_night=%s cloud_cover=%s", condition, icon, temp, is_night, cloud_cover)
-        return {"icon": icon, "temperature": temp, "is_night": str(is_night).lower(), "cloud_cover": str(int(cloud_cover))}
+        logger.info("HA weather: condition=%s icon=%s temp=%s is_night=%s cloud_cover=%s elevation=%.1f",
+                     condition, icon, temp, is_night, cloud_cover, sun_elevation)
+        return {
+            "icon": icon, "temperature": temp, "is_night": str(is_night).lower(),
+            "cloud_cover": str(int(cloud_cover)), "sun_elevation": str(round(sun_elevation, 1)),
+        }
     except requests.RequestException as e:
         logger.error("Failed to fetch HA weather (%s): %s", entity_id, e)
         return dict(DEFAULT_WEATHER)
@@ -212,7 +214,7 @@ def fetch_weather_pirate(config):
         # Pirate Weather encodes day/night in the icon name
         is_night = "night" in icon
         cloud_cover = currently.get("cloudCover", 0)
-        return {"icon": icon, "temperature": temp, "is_night": str(is_night).lower(), "cloud_cover": str(int(cloud_cover * 100))}
+        return {"icon": icon, "temperature": temp, "is_night": str(is_night).lower(), "cloud_cover": str(int(cloud_cover * 100)), "sun_elevation": "0"}
     except requests.RequestException as e:
         logger.error("Failed to fetch weather: %s", e)
         return dict(DEFAULT_WEATHER)
@@ -237,6 +239,7 @@ def render_pixlet(sensor_data, weather_data, config=None):
         f"temperature={weather_data.get('temperature', '')}",
         f"is_night={weather_data.get('is_night', 'false')}",
         f"cloud_cover={weather_data.get('cloud_cover', '0')}",
+        f"sun_elevation={weather_data.get('sun_elevation', '0')}",
         f"month={now.month}",
         f"day={now.day}",
         f"seasonal={seasonal}",
@@ -353,6 +356,7 @@ def _cache_to_render_data(cache, config):
 
         sun_entry = cache.get("sun.sun", {})
         is_night = sun_entry.get("state") == "below_horizon"
+        sun_elevation = float(sun_entry.get("attributes", {}).get("elevation", 0))
 
         attrs = w_entry.get("attributes", {})
         temp = attrs.get("temperature")
@@ -367,7 +371,14 @@ def _cache_to_render_data(cache, config):
         else:
             temp = ""
 
-        weather_data = {"icon": icon, "temperature": temp, "is_night": str(is_night).lower()}
+        cloud_cover = attrs.get("cloud_coverage", attrs.get("cloudiness", 0))
+        if cloud_cover is None:
+            cloud_cover = 0
+
+        weather_data = {
+            "icon": icon, "temperature": temp, "is_night": str(is_night).lower(),
+            "cloud_cover": str(int(cloud_cover)), "sun_elevation": str(round(sun_elevation, 1)),
+        }
     else:
         # Pirate Weather: not available via WS, use cached REST result
         weather_data = cache.get("_weather_pirate", dict(DEFAULT_WEATHER))
