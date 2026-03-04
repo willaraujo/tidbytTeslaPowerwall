@@ -229,3 +229,4 @@ At nighttime, twinkling stars are automatically layered behind all weather effec
 | **Wrong sensor values** | Double-check entity IDs in HA Developer Tools > States -- copy them exactly |
 | **Raspberry Pi build fails** | Add `--build-arg TARGETARCH=arm64` to your docker build command |
 | **Night detection seems wrong** | Check `TZ` in `docker-compose.yml` -- change `America/New_York` to your timezone |
+Plugin
