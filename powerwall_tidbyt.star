@@ -245,17 +245,21 @@ def build_battery_bar(battery_pct):
         ],
     )
 
-    # Percentage text next to the top of the battery
+    # Percentage text to the right of the battery
     if battery_pct >= 100:
         pct_text = "100"
     else:
         pct_text = "%d%%" % battery_pct
 
-    return render.Column(
+    return render.Row(
+        main_align = "center",
         cross_align = "center",
         children = [
-            render.Text(content = pct_text, font = "tom-thumb", color = "#ffffff"),
             battery_icon,
+            render.Padding(
+                pad = (1, 0, 0, 0),
+                child = render.Text(content = pct_text, font = "tom-thumb", color = "#ffffff"),
+            ),
         ],
     )
 
