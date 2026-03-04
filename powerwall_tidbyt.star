@@ -1,7 +1,7 @@
 """
 Applet: Powerwall Weather
 Summary: Tesla Powerwall + Weather
-Description: Energy production and consumption monitor for Tesla Powerwall 3 with animated weather effects. Pulls data from Home Assistant.
+Description: Energy monitor for Tesla Powerwall 3. At night, the solar column becomes a weather display.
 Author: willaraujo
 """
 
@@ -9,20 +9,13 @@ load("encoding/base64.star", "base64")
 load("render.star", "render")
 load("animation.star", "animation")
 
-# Icons from the Tesla Solar community app (base64-encoded PNGs)
+# Icons (base64-encoded PNGs)
 SOLAR_PANEL = base64.decode(
     "iVBORw0KGgoAAAANSUhEUgAAABUAAAAQCAYAAAD52jQlAAAArElEQVQ4ja2T2xGFIAxETxyrcOhM" +
     "y7M0xzb2fjA4kYcPrvsFCSzhBExCZDLDAHwuxZ5ovEq+MfIaWkYSqt3ikdLmlkG38dcmx1U9v2h8" +
     "721mVeaNRgkwpjCzbytTWABO43i4VDMe44lYqlaS4sb5ttKWiu5faQoL+7ae5pLKd+4ntQVPlCMo" +
     "mHpmOcNWLGc7+ES+uFevmELJNcU8ugG+rRKOx9/XoKph40P8rR8wcGBXI4UlEQAAAABJRU5ErkJg" +
     "gg=="
-)
-
-SOLAR_PANEL_OFF = base64.decode(
-    "iVBORw0KGgoAAAANSUhEUgAAABUAAAAQCAYAAAD52jQlAAAAqUlEQVR42r1Tyw2FIBBciIn2QBX2" +
-    "oLcpd2/QgyXtO7zwsiIgInlzYn+T2QEMQEIJmMkQEelazLVgqhWfEGnYmsrcFk2IwyWCbuLRJL9V" +
-    "tX9fYtwOM7NpVgdAAJJ5cQJA5sVdzjEuXhQzmUgMQHw4yAfXvb590uzDQfu2nuKcWpOu3aMs9XbK" +
-    "qYnYt/UUl3IARBNbXUib/+Jpztect3a0SvX4IaMIqx/iDT6K+2Bh0eFQtQAAAABJRU5ErkJggg=="
 )
 
 GRID = base64.decode(
@@ -52,12 +45,14 @@ DOTS_RTL = base64.decode(
     "AgmMj5lgHO6UTAUAOw=="
 )
 
-# Weather condition colors
+# Weather colors for column-1 animations
 RAIN_COLOR = "#4488CC"
 SNOW_COLOR = "#CCDDFF"
-SUN_GLOW_COLOR = "#332200"
-STAR_COLOR = "#FFFFFF"
+STAR_COLOR = "#8888AA"
+CLOUD_COLOR = "#3a3a3a"
+MOON_COLOR = "#CCCC88"
 WIND_COLOR = "#667788"
+FOG_COLOR = "#333333"
 
 def main(config):
     battery_pct = int(config.get("battery_pct", "0"))
@@ -66,145 +61,110 @@ def main(config):
     grid_power = float(config.get("grid_power", "0"))
     grid_status = config.get("grid_status", "on")
     weather_icon = config.get("weather_icon", "clear-day")
-    temperature = config.get("temperature", "")
-    is_night = config.get("is_night", "false") == "true"
 
-    # Determine solar icon
+    # Determine column 1 icon: solar panel when producing, weather when not
     if solar_power > 0:
-        solar_img = SOLAR_PANEL
+        col1_icon = render.Image(src = SOLAR_PANEL)
         solar_flow = 1
     else:
-        solar_img = SOLAR_PANEL_OFF
+        col1_icon = build_weather_icon(weather_icon)
         solar_flow = 0
 
     # Determine grid flow direction
     if grid_power < -10:
-        grid_flow = 1   # exporting to grid (left to right from home)
+        grid_flow = 1   # exporting to grid
     elif grid_power > 10:
-        grid_flow = -1  # importing from grid (right to left)
+        grid_flow = -1  # importing from grid
     else:
-        grid_flow = 0   # no significant flow
+        grid_flow = 0
 
     # Format power values
     solar_text = format_power(solar_power)
     load_text = format_power(load_power)
     grid_text = format_power(grid_power)
 
-    # Battery color
+    # Battery color: red < 10%, yellow 10-20%, green > 20%
     batt_color = "#00cc00"
-    if battery_pct < 5:
+    if battery_pct < 10:
         batt_color = "#ff0000"
     elif battery_pct < 20:
-        batt_color = "#ff6600"
+        batt_color = "#ffcc00"
 
-    # Unit text - show battery % in home column, kW elsewhere
     batt_unit = "%d%%" % battery_pct
+    solar_color = "#ffd11a" if solar_power > 0 else "#666666"
 
-    # Build the three data columns
-    columns = []
-
-    # Column 1: Solar
-    columns.append(
-        render.Column(
-            main_align = "space_between",
-            cross_align = "center",
-            children = [
-                render.Image(src = solar_img),
-                render.Text(
-                    content = solar_text,
-                    height = 8,
-                    font = "tb-8",
-                    color = "#ffd11a" if solar_power > 0 else "#666666",
-                ),
-                render.Text(
-                    content = "kW",
-                    height = 8,
-                    font = "tb-8",
-                    color = "#ffd11a" if solar_power > 0 else "#666666",
-                ),
-            ],
-        ),
+    # Column 1: Solar / Weather
+    col1 = render.Column(
+        main_align = "space_between",
+        cross_align = "center",
+        children = [
+            col1_icon,
+            render.Text(content = solar_text, height = 8, font = "tb-8", color = solar_color),
+            render.Text(content = "kW", height = 8, font = "tb-8", color = solar_color),
+        ],
     )
 
-    # Column 2: Home (with battery % as unit)
-    columns.append(
-        render.Column(
-            main_align = "space_between",
-            cross_align = "center",
-            children = [
-                render.Image(src = HOUSE),
-                render.Text(
-                    content = load_text,
-                    height = 8,
-                    font = "tb-8",
-                    color = "#ffd11a",
-                ),
-                render.Text(
-                    content = batt_unit,
-                    height = 8,
-                    font = "tb-8",
-                    color = batt_color,
-                ),
-            ],
-        ),
+    # Column 2: Home + battery %
+    col2 = render.Column(
+        main_align = "space_between",
+        cross_align = "center",
+        children = [
+            render.Box(width = 21, height = 16, child = render.Row(
+                main_align = "center",
+                children = [render.Image(src = HOUSE)],
+            )),
+            render.Text(content = load_text, height = 8, font = "tb-8", color = "#ffd11a"),
+            render.Text(content = batt_unit, height = 8, font = "tb-8", color = batt_color),
+        ],
     )
 
     # Column 3: Grid
     grid_color = "#ffd11a"
     if grid_status != "on" and grid_status != "On":
         grid_color = "#ff0000"
-    columns.append(
-        render.Column(
-            main_align = "space_between",
-            cross_align = "center",
-            children = [
-                render.Image(src = GRID),
-                render.Text(
-                    content = grid_text,
-                    height = 8,
-                    font = "tb-8",
-                    color = grid_color,
-                ),
-                render.Text(
-                    content = "kW",
-                    height = 8,
-                    font = "tb-8",
-                    color = grid_color,
-                ),
-            ],
-        ),
+
+    col3 = render.Column(
+        main_align = "space_between",
+        cross_align = "center",
+        children = [
+            render.Box(width = 21, height = 16, child = render.Row(
+                main_align = "center",
+                children = [render.Image(src = GRID)],
+            )),
+            render.Text(content = grid_text, height = 8, font = "tb-8", color = grid_color),
+            render.Text(content = "kW", height = 8, font = "tb-8", color = grid_color),
+        ],
     )
 
-    # Build energy flow dots row
-    dots = [render.Box(width = 18)]
+    # Energy flow dots row
+    dots = [render.Box(width = 6)]
 
     # Solar -> Home flow dots
     if solar_flow:
-        dots.append(
-            render.Stack(children = [render.Box(width = 21), render.Image(src = DOTS_LTR)]),
-        )
+        dots.append(render.Image(src = DOTS_LTR))
     else:
-        dots.append(render.Stack(children = [render.Box(width = 21), render.Box(width = 10)]))
+        dots.append(render.Box(width = 10))
+
+    dots.append(render.Box(width = 12))
 
     # Grid <-> Home flow dots
     if grid_flow == -1:
-        dots.append(
-            render.Stack(children = [render.Box(width = 21), render.Image(src = DOTS_RTL)]),
-        )
+        dots.append(render.Image(src = DOTS_RTL))
     elif grid_flow == 1:
-        dots.append(
-            render.Stack(children = [render.Box(width = 21), render.Image(src = DOTS_LTR)]),
-        )
+        dots.append(render.Image(src = DOTS_LTR))
     else:
-        dots.append(render.Stack(children = [render.Box(width = 21), render.Box(width = 10)]))
+        dots.append(render.Box(width = 10))
 
-    # Main data display
-    data_layer = render.Stack(
+    # Main display: fixed-width columns for centering
+    display = render.Stack(
         children = [
             render.Row(
                 expanded = True,
-                main_align = "space_between",
-                children = columns,
+                children = [
+                    render.Box(width = 22, child = col1),
+                    render.Box(width = 20, child = col2),
+                    render.Box(width = 22, child = col3),
+                ],
             ),
             render.Column(
                 children = [
@@ -215,405 +175,333 @@ def main(config):
         ],
     )
 
-    # Build weather animation overlay (with stars behind at night)
-    weather_layer = build_weather_animation(weather_icon, is_night)
-
-    # Stack weather behind data
-    if weather_layer:
-        display = render.Stack(
-            children = [
-                weather_layer,
-                data_layer,
-            ],
-        )
-    else:
-        display = data_layer
-
     return render.Root(
         delay = 100,
         child = display,
     )
 
-def _with_stars(effect):
-    """Layer twinkling stars behind a weather effect for nighttime."""
-    return render.Stack(children = [night_animation(), effect])
+# --- Weather icons for column 1 (21x16 area) ---
 
-def build_weather_animation(weather_icon, is_night):
-    """Build ambient weather animation overlay based on condition.
-    When is_night is True, twinkling stars are layered behind weather effects."""
-    if weather_icon == "rain" or weather_icon == "sleet":
-        anim = rain_animation()
-        return _with_stars(anim) if is_night else anim
+def build_weather_icon(weather_icon):
+    """Build a 21x16 weather widget for the solar column when solar=0."""
+    if weather_icon == "clear-night":
+        return _moon_and_stars()
+    elif weather_icon == "rain" or weather_icon == "sleet":
+        return _rain_icon()
     elif weather_icon == "snow":
-        anim = snow_animation()
-        return _with_stars(anim) if is_night else anim
-    elif weather_icon == "clear-day":
-        return sun_animation()
-    elif weather_icon == "clear-night":
-        return night_animation()
-    elif weather_icon == "cloudy":
-        anim = cloud_animation()
-        return _with_stars(anim) if is_night else anim
-    elif weather_icon == "overcast":
-        anim = overcast_animation()
-        return _with_stars(anim) if is_night else anim
-    elif weather_icon == "partly-cloudy-day":
-        return partly_cloudy_day_animation()
+        return _snow_icon()
+    elif weather_icon == "cloudy" or weather_icon == "overcast":
+        return _cloud_icon()
     elif weather_icon == "partly-cloudy-night":
-        return partly_cloudy_night_animation()
+        return _moon_and_cloud()
+    elif weather_icon == "partly-cloudy-day":
+        return _cloud_icon()
     elif weather_icon == "wind":
-        anim = wind_animation()
-        return _with_stars(anim) if is_night else anim
+        return _wind_icon()
     elif weather_icon == "fog":
-        anim = fog_animation()
-        return _with_stars(anim) if is_night else anim
-    return None
+        return _fog_icon()
+    return _moon_and_stars()
 
-def rain_animation():
-    """Animated rain drops falling across the display."""
-    drops = []
-    # Create several rain drops at different X positions and timing offsets
-    drop_positions = [5, 18, 32, 47, 58]
-    drop_delays = [0, 12, 6, 18, 3]
-
-    for i in range(len(drop_positions)):
-        x = drop_positions[i]
-        delay = drop_delays[i]
-        drops.append(
-            render.Padding(
-                pad = (x, 0, 0, 0),
-                child = animation.Transformation(
-                    child = render.Box(width = 1, height = 2, color = RAIN_COLOR),
-                    duration = 30,
-                    delay = delay,
-                    direction = "normal",
-                    fill_mode = "forwards",
-                    keyframes = [
-                        animation.Keyframe(
-                            percentage = 0.0,
-                            transforms = [animation.Translate(0, -4)],
-                            curve = "linear",
-                        ),
-                        animation.Keyframe(
-                            percentage = 1.0,
-                            transforms = [animation.Translate(0, 34)],
-                        ),
-                    ],
+def _moon_and_stars():
+    """Crescent moon with twinkling stars in 21x16 area."""
+    return render.Box(
+        width = 21,
+        height = 16,
+        child = render.Stack(
+            children = [
+                # Moon crescent: bright circle with dark overlay to create crescent
+                render.Padding(
+                    pad = (7, 3, 0, 0),
+                    child = render.Box(width = 7, height = 7, color = MOON_COLOR),
                 ),
-            ),
-        )
-
-    return render.Stack(children = drops)
-
-def snow_animation():
-    """Animated snowflakes drifting down slowly."""
-    flakes = []
-    flake_x = [3, 15, 28, 42, 55]
-    flake_delays = [0, 15, 8, 22, 5]
-
-    for i in range(len(flake_x)):
-        x = flake_x[i]
-        delay = flake_delays[i]
-        # Snow drifts with slight horizontal wobble
-        flakes.append(
-            render.Padding(
-                pad = (x, 0, 0, 0),
-                child = animation.Transformation(
-                    child = render.Box(width = 1, height = 1, color = SNOW_COLOR),
-                    duration = 50,
-                    delay = delay,
-                    direction = "normal",
-                    fill_mode = "forwards",
-                    keyframes = [
-                        animation.Keyframe(
-                            percentage = 0.0,
-                            transforms = [animation.Translate(0, -2)],
-                            curve = "linear",
-                        ),
-                        animation.Keyframe(
-                            percentage = 0.5,
-                            transforms = [animation.Translate(2, 16)],
-                            curve = "ease_in_out",
-                        ),
-                        animation.Keyframe(
-                            percentage = 1.0,
-                            transforms = [animation.Translate(-1, 34)],
-                        ),
-                    ],
+                # Dark cutout for crescent shape (overlaps top-right of moon)
+                render.Padding(
+                    pad = (10, 1, 0, 0),
+                    child = render.Box(width = 6, height = 6, color = "#000000"),
                 ),
-            ),
-        )
-
-    return render.Stack(children = flakes)
-
-def sun_animation():
-    """Subtle yellow glow pixels for sunny conditions."""
-    rays = []
-    # Small yellow dots at edges that pulse
-    ray_positions = [(0, 0), (60, 0), (0, 28), (60, 28), (30, 0)]
-
-    for pos in ray_positions:
-        x, y = pos[0], pos[1]
-        rays.append(
-            render.Padding(
-                pad = (x, y, 0, 0),
-                child = animation.Transformation(
-                    child = render.Box(width = 2, height = 2, color = SUN_GLOW_COLOR),
-                    duration = 40,
-                    delay = 0,
-                    direction = "alternate",
-                    fill_mode = "forwards",
-                    keyframes = [
-                        animation.Keyframe(
-                            percentage = 0.0,
-                            transforms = [animation.Scale(1.0, 1.0)],
-                            curve = "ease_in_out",
-                        ),
-                        animation.Keyframe(
-                            percentage = 1.0,
-                            transforms = [animation.Scale(0.0, 0.0)],
-                        ),
-                    ],
-                ),
-            ),
-        )
-
-    return render.Stack(children = rays)
-
-def night_animation():
-    """Dark background with twinkling star dots."""
-    stars = []
-    star_positions = [(4, 2), (22, 5), (50, 1), (38, 3), (12, 28)]
-    star_delays = [0, 20, 10, 30, 15]
-
-    for i in range(len(star_positions)):
-        x, y = star_positions[i][0], star_positions[i][1]
-        delay = star_delays[i]
-        stars.append(
-            render.Padding(
-                pad = (x, y, 0, 0),
-                child = animation.Transformation(
-                    child = render.Box(width = 1, height = 1, color = STAR_COLOR),
-                    duration = 40,
-                    delay = delay,
-                    direction = "alternate",
-                    fill_mode = "forwards",
-                    keyframes = [
-                        animation.Keyframe(
-                            percentage = 0.0,
-                            transforms = [animation.Scale(1.0, 1.0)],
-                            curve = "ease_in_out",
-                        ),
-                        animation.Keyframe(
-                            percentage = 1.0,
-                            transforms = [animation.Scale(0.0, 0.0)],
-                        ),
-                    ],
-                ),
-            ),
-        )
-
-    return render.Stack(children = stars)
-
-def _build_clouds(cloud_defs):
-    """Render drifting cloud shapes from a list of (y, width, height, duration, delay, color)."""
-    clouds = []
-    for cloud_def in cloud_defs:
-        y, w, h, dur, delay, color = cloud_def[0], cloud_def[1], cloud_def[2], cloud_def[3], cloud_def[4], cloud_def[5]
-        clouds.append(
-            animation.Transformation(
-                child = render.Padding(
-                    pad = (0, y, 0, 0),
-                    child = render.Row(
-                        children = [
-                            render.Box(width = w, height = h, color = color),
-                            render.Padding(
-                                pad = (0, 1, 0, 0),
-                                child = render.Box(width = int(w / 2), height = max(h - 1, 1), color = color),
-                            ),
+                # Star 1
+                render.Padding(
+                    pad = (2, 2, 0, 0),
+                    child = animation.Transformation(
+                        child = render.Box(width = 1, height = 1, color = STAR_COLOR),
+                        duration = 50,
+                        delay = 0,
+                        direction = "alternate",
+                        fill_mode = "forwards",
+                        keyframes = [
+                            animation.Keyframe(percentage = 0.0, transforms = [animation.Scale(1.0, 1.0)], curve = "ease_in_out"),
+                            animation.Keyframe(percentage = 1.0, transforms = [animation.Scale(0.0, 0.0)]),
                         ],
                     ),
                 ),
-                duration = dur,
-                delay = delay,
-                direction = "normal",
-                fill_mode = "forwards",
-                keyframes = [
-                    animation.Keyframe(
-                        percentage = 0.0,
-                        transforms = [animation.Translate(-15, 0)],
-                        curve = "linear",
+                # Star 2
+                render.Padding(
+                    pad = (17, 5, 0, 0),
+                    child = animation.Transformation(
+                        child = render.Box(width = 1, height = 1, color = STAR_COLOR),
+                        duration = 50,
+                        delay = 25,
+                        direction = "alternate",
+                        fill_mode = "forwards",
+                        keyframes = [
+                            animation.Keyframe(percentage = 0.0, transforms = [animation.Scale(1.0, 1.0)], curve = "ease_in_out"),
+                            animation.Keyframe(percentage = 1.0, transforms = [animation.Scale(0.0, 0.0)]),
+                        ],
                     ),
-                    animation.Keyframe(
-                        percentage = 1.0,
-                        transforms = [animation.Translate(70, 0)],
+                ),
+                # Star 3
+                render.Padding(
+                    pad = (4, 12, 0, 0),
+                    child = animation.Transformation(
+                        child = render.Box(width = 1, height = 1, color = STAR_COLOR),
+                        duration = 50,
+                        delay = 15,
+                        direction = "alternate",
+                        fill_mode = "forwards",
+                        keyframes = [
+                            animation.Keyframe(percentage = 0.0, transforms = [animation.Scale(1.0, 1.0)], curve = "ease_in_out"),
+                            animation.Keyframe(percentage = 1.0, transforms = [animation.Scale(0.0, 0.0)]),
+                        ],
                     ),
-                ],
+                ),
+            ],
+        ),
+    )
+
+def _moon_and_cloud():
+    """Moon with a small drifting cloud."""
+    return render.Box(
+        width = 21,
+        height = 16,
+        child = render.Stack(
+            children = [
+                # Moon
+                render.Padding(
+                    pad = (7, 2, 0, 0),
+                    child = render.Box(width = 6, height = 6, color = MOON_COLOR),
+                ),
+                render.Padding(
+                    pad = (10, 0, 0, 0),
+                    child = render.Box(width = 5, height = 5, color = "#000000"),
+                ),
+                # Drifting cloud
+                animation.Transformation(
+                    child = render.Padding(
+                        pad = (0, 9, 0, 0),
+                        child = render.Row(
+                            children = [
+                                render.Box(width = 8, height = 3, color = CLOUD_COLOR),
+                                render.Padding(
+                                    pad = (0, 1, 0, 0),
+                                    child = render.Box(width = 4, height = 2, color = CLOUD_COLOR),
+                                ),
+                            ],
+                        ),
+                    ),
+                    duration = 80,
+                    delay = 0,
+                    direction = "normal",
+                    fill_mode = "forwards",
+                    keyframes = [
+                        animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(-12, 0)], curve = "linear"),
+                        animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(22, 0)]),
+                    ],
+                ),
+            ],
+        ),
+    )
+
+def _rain_icon():
+    """Rain drops falling within 21x16 area."""
+    drops = []
+    drop_x = [3, 10, 17]
+    drop_delays = [0, 10, 5]
+
+    for i in range(len(drop_x)):
+        drops.append(
+            render.Padding(
+                pad = (drop_x[i], 0, 0, 0),
+                child = animation.Transformation(
+                    child = render.Box(width = 1, height = 2, color = RAIN_COLOR),
+                    duration = 25,
+                    delay = drop_delays[i],
+                    direction = "normal",
+                    fill_mode = "forwards",
+                    keyframes = [
+                        animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(0, -3)], curve = "linear"),
+                        animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(0, 18)]),
+                    ],
+                ),
             ),
         )
-    return render.Stack(children = clouds)
 
-def cloud_animation():
-    """Multiple cloud shapes drifting at different heights and speeds."""
-    return _build_clouds([
-        (1, 10, 3, 90, 0, "#3a3a3a"),
-        (5, 6, 2, 70, 30, "#444444"),
-        (26, 8, 2, 85, 50, "#3a3a3a"),
-    ])
-
-def overcast_animation():
-    """Heavy cloud cover -- more clouds, darker, multiple layers."""
-    return _build_clouds([
-        (0, 12, 3, 100, 0, "#333333"),
-        (2, 8, 2, 75, 15, "#3a3a3a"),
-        (4, 10, 3, 90, 40, "#2e2e2e"),
-        (14, 7, 2, 80, 25, "#333333"),
-        (24, 9, 3, 85, 10, "#2e2e2e"),
-        (27, 6, 2, 70, 50, "#3a3a3a"),
-    ])
-
-def partly_cloudy_day_animation():
-    """Sun glow with a single small cloud drifting through."""
-    sun = sun_animation()
-    # Just one small cloud -- "partly" means mostly clear
-    cloud = animation.Transformation(
-        child = render.Padding(
-            pad = (0, 2, 0, 0),
+    # Small cloud at top
+    drops.append(
+        render.Padding(
+            pad = (4, 0, 0, 0),
             child = render.Row(
                 children = [
-                    render.Box(width = 7, height = 2, color = "#444444"),
-                    render.Padding(
-                        pad = (0, 1, 0, 0),
-                        child = render.Box(width = 3, height = 1, color = "#444444"),
-                    ),
+                    render.Box(width = 10, height = 3, color = CLOUD_COLOR),
+                    render.Padding(pad = (0, 1, 0, 0), child = render.Box(width = 4, height = 2, color = CLOUD_COLOR)),
                 ],
             ),
         ),
-        duration = 90,
-        delay = 0,
-        direction = "normal",
-        fill_mode = "forwards",
-        keyframes = [
-            animation.Keyframe(
-                percentage = 0.0,
-                transforms = [animation.Translate(-12, 0)],
-                curve = "linear",
-            ),
-            animation.Keyframe(
-                percentage = 1.0,
-                transforms = [animation.Translate(70, 0)],
-            ),
-        ],
     )
-    return render.Stack(children = [sun, cloud])
 
-def partly_cloudy_night_animation():
-    """Stars with a single small cloud drifting through."""
-    stars = night_animation()
-    cloud = animation.Transformation(
-        child = render.Padding(
-            pad = (0, 2, 0, 0),
+    return render.Box(width = 21, height = 16, child = render.Stack(children = drops))
+
+def _snow_icon():
+    """Snowflakes drifting within 21x16 area."""
+    flakes = []
+    flake_x = [2, 10, 16]
+    flake_delays = [0, 12, 6]
+
+    for i in range(len(flake_x)):
+        flakes.append(
+            render.Padding(
+                pad = (flake_x[i], 0, 0, 0),
+                child = animation.Transformation(
+                    child = render.Box(width = 1, height = 1, color = SNOW_COLOR),
+                    duration = 40,
+                    delay = flake_delays[i],
+                    direction = "normal",
+                    fill_mode = "forwards",
+                    keyframes = [
+                        animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(0, -2)], curve = "linear"),
+                        animation.Keyframe(percentage = 0.5, transforms = [animation.Translate(2, 8)], curve = "ease_in_out"),
+                        animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(-1, 18)]),
+                    ],
+                ),
+            ),
+        )
+
+    # Cloud at top
+    flakes.append(
+        render.Padding(
+            pad = (4, 0, 0, 0),
             child = render.Row(
                 children = [
-                    render.Box(width = 7, height = 2, color = "#3a3a3a"),
-                    render.Padding(
-                        pad = (0, 1, 0, 0),
-                        child = render.Box(width = 3, height = 1, color = "#3a3a3a"),
-                    ),
+                    render.Box(width = 10, height = 3, color = CLOUD_COLOR),
+                    render.Padding(pad = (0, 1, 0, 0), child = render.Box(width = 4, height = 2, color = CLOUD_COLOR)),
                 ],
             ),
         ),
-        duration = 90,
-        delay = 0,
-        direction = "normal",
-        fill_mode = "forwards",
-        keyframes = [
-            animation.Keyframe(
-                percentage = 0.0,
-                transforms = [animation.Translate(-12, 0)],
-                curve = "linear",
-            ),
-            animation.Keyframe(
-                percentage = 1.0,
-                transforms = [animation.Translate(70, 0)],
-            ),
-        ],
     )
-    return render.Stack(children = [stars, cloud])
 
-def wind_animation():
-    """Fast horizontal streaks for windy/hurricane conditions."""
+    return render.Box(width = 21, height = 16, child = render.Stack(children = flakes))
+
+def _cloud_icon():
+    """Drifting clouds within 21x16 area."""
+    return render.Box(
+        width = 21,
+        height = 16,
+        child = render.Stack(
+            children = [
+                # Cloud 1
+                animation.Transformation(
+                    child = render.Padding(
+                        pad = (0, 3, 0, 0),
+                        child = render.Row(
+                            children = [
+                                render.Box(width = 10, height = 3, color = CLOUD_COLOR),
+                                render.Padding(pad = (0, 1, 0, 0), child = render.Box(width = 4, height = 2, color = CLOUD_COLOR)),
+                            ],
+                        ),
+                    ),
+                    duration = 70,
+                    delay = 0,
+                    direction = "normal",
+                    fill_mode = "forwards",
+                    keyframes = [
+                        animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(-14, 0)], curve = "linear"),
+                        animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(22, 0)]),
+                    ],
+                ),
+                # Cloud 2
+                animation.Transformation(
+                    child = render.Padding(
+                        pad = (0, 9, 0, 0),
+                        child = render.Row(
+                            children = [
+                                render.Box(width = 7, height = 2, color = "#444444"),
+                                render.Padding(pad = (0, 1, 0, 0), child = render.Box(width = 3, height = 1, color = "#444444")),
+                            ],
+                        ),
+                    ),
+                    duration = 55,
+                    delay = 20,
+                    direction = "normal",
+                    fill_mode = "forwards",
+                    keyframes = [
+                        animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(-10, 0)], curve = "linear"),
+                        animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(22, 0)]),
+                    ],
+                ),
+            ],
+        ),
+    )
+
+def _wind_icon():
+    """Horizontal wind streaks within 21x16 area."""
     streaks = []
-    streak_y = [3, 10, 18, 25, 30]
-    streak_delays = [0, 5, 2, 8, 4]
+    streak_y = [3, 8, 13]
+    streak_delays = [0, 4, 2]
 
     for i in range(len(streak_y)):
-        y = streak_y[i]
-        delay = streak_delays[i]
         streaks.append(
             animation.Transformation(
                 child = render.Padding(
-                    pad = (0, y, 0, 0),
-                    child = render.Box(width = 4, height = 1, color = WIND_COLOR),
+                    pad = (0, streak_y[i], 0, 0),
+                    child = render.Box(width = 5, height = 1, color = WIND_COLOR),
                 ),
-                duration = 15,
-                delay = delay,
+                duration = 12,
+                delay = streak_delays[i],
                 direction = "normal",
                 fill_mode = "forwards",
                 keyframes = [
-                    animation.Keyframe(
-                        percentage = 0.0,
-                        transforms = [animation.Translate(-6, 0)],
-                        curve = "linear",
-                    ),
-                    animation.Keyframe(
-                        percentage = 1.0,
-                        transforms = [animation.Translate(68, 0)],
-                    ),
+                    animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(-6, 0)], curve = "linear"),
+                    animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(22, 0)]),
                 ],
             ),
         )
 
-    return render.Stack(children = streaks)
+    return render.Box(width = 21, height = 16, child = render.Stack(children = streaks))
 
-def fog_animation():
-    """Low-opacity gray haze drifting slowly."""
+def _fog_icon():
+    """Gray haze drifting within 21x16 area."""
     haze = []
-    haze_y = [8, 18, 26]
+    haze_y = [4, 9, 13]
 
     for y in haze_y:
         haze.append(
             animation.Transformation(
                 child = render.Padding(
                     pad = (0, y, 0, 0),
-                    child = render.Box(width = 12, height = 2, color = "#222222"),
+                    child = render.Box(width = 10, height = 2, color = FOG_COLOR),
                 ),
-                duration = 100,
+                duration = 60,
                 delay = y * 3,
                 direction = "alternate",
                 fill_mode = "forwards",
                 keyframes = [
-                    animation.Keyframe(
-                        percentage = 0.0,
-                        transforms = [animation.Translate(-15, 0)],
-                        curve = "ease_in_out",
-                    ),
-                    animation.Keyframe(
-                        percentage = 1.0,
-                        transforms = [animation.Translate(55, 0)],
-                    ),
+                    animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(-8, 0)], curve = "ease_in_out"),
+                    animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(12, 0)]),
                 ],
             ),
         )
 
-    return render.Stack(children = haze)
+    return render.Box(width = 21, height = 16, child = render.Stack(children = haze))
 
 def format_power(watts):
-    """Format wattage: '1.92' for >=1000W, '784' for <1000W, '0' for 0."""
+    """Format wattage as compact kW: 0W->'0', 676W->'.7', 1920W->'1.9'"""
     w = abs(watts)
-    if w < 1:
+    if w < 50:
         return "0"
-    elif w >= 1000:
-        return "%.2f" % (w / 1000.0)
-    else:
-        return "%d" % int(w)
+    kw = w / 1000.0
+    if kw < 0.95:
+        d = int(kw * 10 + 0.5)
+        return ".%d" % d
+    tenths = int(kw * 10 + 0.5)
+    whole = tenths // 10
+    frac = tenths % 10
+    return "%d.%d" % (whole, frac)

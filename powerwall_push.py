@@ -295,7 +295,7 @@ def run_once(config):
 
 def main():
     config = load_config()
-    interval = config.get("schedule", {}).get("interval_seconds", 120)
+    interval = config.get("schedule", {}).get("interval_seconds", 15)
     once = "--once" in sys.argv
 
     if once:
