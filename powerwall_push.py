@@ -146,21 +146,19 @@ def fetch_weather_ha(config):
         data = resp.json()
 
         condition = data.get("state", "sunny")
-        attrs = data.get("attributes", {})
-        temp = attrs.get("temperature", "")
+        if condition in ("unavailable", "unknown"):
+            logger.warning("Weather entity %s is %s", entity_id, condition)
+            return {"icon": "clear-day", "temperature": ""}
 
-        # Map HA condition to renderer icon name
+        attrs = data.get("attributes", {})
+        temp = attrs.get("temperature")
+
         icon = HA_CONDITION_MAP.get(condition, "cloudy")
 
-        # Distinguish partly-cloudy day vs night using HA's friendly condition
-        if condition == "partlycloudy":
-            # If a clear-night condition exists nearby or it's after sunset,
-            # HA may not tell us directly — default to day variant.
-            # Users can override via a template sensor if needed.
-            icon = "partly-cloudy-day"
-
-        if temp != "":
+        if temp is not None:
             temp = str(int(round(float(temp))))
+        else:
+            temp = ""
 
         logger.info("HA weather: condition=%s icon=%s temp=%s", condition, icon, temp)
         return {"icon": icon, "temperature": temp}

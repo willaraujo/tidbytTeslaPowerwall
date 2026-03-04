@@ -82,12 +82,14 @@ home_assistant:
     grid_power: "sensor.powerwall_grid_power"
     grid_status: "binary_sensor.powerwall_grid_status"
 
-## Option A: Home Assistant weather (Met.no — no API key needed)
+# Pick ONE weather provider below:
+
+# Option A: Home Assistant weather (Met.no — no API key needed)
 weather:
   provider: "homeassistant"
   entity_id: "weather.home"
 
-## Option B: Pirate Weather (external API)
+# Option B: Pirate Weather (replace the block above with this)
 # weather:
 #   provider: "pirateweather"
 #   api_key: "your_pirate_weather_api_key"
