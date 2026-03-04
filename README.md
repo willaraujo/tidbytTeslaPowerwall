@@ -157,27 +157,30 @@ pixlet serve powerwall_tidbyt.star \
   -c grid_power=-1120 \
   -c grid_status=on \
   -c weather_icon=rain \
-  -c temperature=72
+  -c temperature=72 \
+  -c is_night=true
 ```
 
 Then open `http://localhost:8080` in your browser.
 
 ## Weather Conditions
 
-The plugin supports both Pirate Weather and Home Assistant weather conditions:
+The plugin supports both Pirate Weather and Home Assistant weather conditions. At nighttime, twinkling stars are automatically layered behind weather animations.
 
-| Animation | Pirate Weather | HA / Met.no |
-|-----------|---------------|-------------|
-| Yellow glow pixels pulsing | `clear-day` | `sunny` |
-| Twinkling star dots | `clear-night` | `clear-night` |
-| Blue drops falling | `rain` | `rainy`, `pouring`, `lightning`, `lightning-rainy` |
-| White dots drifting | `snow` | `snowy` |
-| Gray clusters drifting | `cloudy` | `cloudy` |
-| Sun glow + cloud drift | `partly-cloudy-day` | `partlycloudy` |
-| Stars + cloud drift | `partly-cloudy-night` | — |
-| Fast horizontal streaks | `wind` | `windy`, `windy-variant` |
-| Gray haze drifting | `fog` | `fog` |
-| Same as rain | `sleet` | `snowy-rainy`, `hail` |
+Day/night detection uses HA's `sun.sun` entity (built-in) when using the HA weather provider. Pirate Weather encodes day/night in its icon names.
+
+| Animation | Night variant | Pirate Weather | HA / Met.no |
+|-----------|--------------|---------------|-------------|
+| Yellow glow pixels pulsing | — | `clear-day` | `sunny` (day) |
+| Twinkling star dots | — | `clear-night` | `clear-night`, `sunny` (night) |
+| Blue drops falling | Stars + rain | `rain` | `rainy`, `pouring`, `lightning`, `lightning-rainy` |
+| White dots drifting | Stars + snow | `snow` | `snowy` |
+| Gray clusters drifting | Stars + clouds | `cloudy` | `cloudy` |
+| Sun glow + cloud drift | — | `partly-cloudy-day` | `partlycloudy` (day) |
+| Stars + cloud drift | — | `partly-cloudy-night` | `partlycloudy` (night) |
+| Fast horizontal streaks | Stars + wind | `wind` | `windy`, `windy-variant` |
+| Gray haze drifting | Stars + fog | `fog` | `fog` |
+| Same as rain | Stars + rain | `sleet` | `snowy-rainy`, `hail` |
 
 ## Troubleshooting
 

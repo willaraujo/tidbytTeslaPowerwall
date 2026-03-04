@@ -121,6 +121,25 @@ def fetch_weather(session, config):
     return fetch_weather_pirate(config)
 
 
+def _is_night_ha(session):
+    """Check HA's sun.sun entity to determine if it's nighttime."""
+    try:
+        data = fetch_ha_entity(session, "sun.sun")
+        is_night = data.get("state") == "below_horizon"
+        logger.info("Sun state: %s (is_night=%s)", data.get("state"), is_night)
+        return is_night
+    except requests.RequestException:
+        logger.warning("Could not fetch sun.sun, assuming daytime")
+        return False
+
+
+# HA conditions that should flip to their night variant when sun is below horizon
+HA_NIGHT_OVERRIDES = {
+    "sunny": "clear-night",
+    "partlycloudy": "partly-cloudy-night",
+}
+
+
 def fetch_weather_ha(session, config):
     """Fetch current weather from a Home Assistant weather entity (e.g. Met.no)."""
     entity_id = config.get("weather", {}).get("entity_id", "weather.home")
@@ -131,22 +150,29 @@ def fetch_weather_ha(session, config):
 
         if condition in ("unavailable", "unknown"):
             logger.warning("Weather entity %s is %s", entity_id, condition)
-            return {"icon": "clear-day", "temperature": ""}
+            return {"icon": "clear-day", "temperature": "", "is_night": "false"}
+
+        is_night = _is_night_ha(session)
 
         attrs = data.get("attributes", {})
         temp = attrs.get("temperature")
-        icon = HA_CONDITION_MAP.get(condition, "cloudy")
+
+        # Use night override if applicable, otherwise fall back to standard map
+        if is_night and condition in HA_NIGHT_OVERRIDES:
+            icon = HA_NIGHT_OVERRIDES[condition]
+        else:
+            icon = HA_CONDITION_MAP.get(condition, "cloudy")
 
         if temp is not None:
             temp = str(int(round(float(temp))))
         else:
             temp = ""
 
-        logger.info("HA weather: condition=%s icon=%s temp=%s", condition, icon, temp)
-        return {"icon": icon, "temperature": temp}
+        logger.info("HA weather: condition=%s icon=%s temp=%s is_night=%s", condition, icon, temp, is_night)
+        return {"icon": icon, "temperature": temp, "is_night": str(is_night).lower()}
     except requests.RequestException as e:
         logger.error("Failed to fetch HA weather (%s): %s", entity_id, e)
-        return {"icon": "clear-day", "temperature": ""}
+        return {"icon": "clear-day", "temperature": "", "is_night": "false"}
 
 
 def fetch_weather_pirate(config):
@@ -158,7 +184,7 @@ def fetch_weather_pirate(config):
 
     if not api_key:
         logger.warning("No Pirate Weather API key configured, skipping weather")
-        return {"icon": "clear-day", "temperature": ""}
+        return {"icon": "clear-day", "temperature": "", "is_night": "false"}
 
     url = f"{PIRATE_WEATHER_URL}/{api_key}/{lat},{lon}"
     params = {"units": "us", "exclude": "minutely,hourly,daily,alerts"}
@@ -172,10 +198,12 @@ def fetch_weather_pirate(config):
         temp = currently.get("temperature", "")
         if temp != "":
             temp = str(int(round(float(temp))))
-        return {"icon": icon, "temperature": temp}
+        # Pirate Weather encodes day/night in the icon name
+        is_night = "night" in icon
+        return {"icon": icon, "temperature": temp, "is_night": str(is_night).lower()}
     except requests.RequestException as e:
         logger.error("Failed to fetch weather: %s", e)
-        return {"icon": "clear-day", "temperature": ""}
+        return {"icon": "clear-day", "temperature": "", "is_night": "false"}
 
 
 def render_pixlet(sensor_data, weather_data):
@@ -190,6 +218,7 @@ def render_pixlet(sensor_data, weather_data):
         "-c", f"grid_status={sensor_data.get('grid_status', 'on')}",
         "-c", f"weather_icon={weather_data.get('icon', 'clear-day')}",
         "-c", f"temperature={weather_data.get('temperature', '')}",
+        "-c", f"is_night={weather_data.get('is_night', 'false')}",
     ]
 
     logger.info("Running: %s", " ".join(cmd))

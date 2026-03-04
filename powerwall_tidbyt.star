@@ -67,6 +67,7 @@ def main(config):
     grid_status = config.get("grid_status", "on")
     weather_icon = config.get("weather_icon", "clear-day")
     temperature = config.get("temperature", "")
+    is_night = config.get("is_night", "false") == "true"
 
     # Determine solar icon
     if solar_power > 0:
@@ -214,8 +215,8 @@ def main(config):
         ],
     )
 
-    # Build weather animation overlay
-    weather_layer = build_weather_animation(weather_icon)
+    # Build weather animation overlay (with stars behind at night)
+    weather_layer = build_weather_animation(weather_icon, is_night)
 
     # Stack weather behind data
     if weather_layer:
@@ -233,28 +234,39 @@ def main(config):
         child = display,
     )
 
-def build_weather_animation(weather_icon):
-    """Build ambient weather animation overlay based on condition."""
+def _with_stars(effect):
+    """Layer twinkling stars behind a weather effect for nighttime."""
+    return render.Stack(children = [night_animation(), effect])
+
+def build_weather_animation(weather_icon, is_night):
+    """Build ambient weather animation overlay based on condition.
+    When is_night is True, twinkling stars are layered behind weather effects."""
     if weather_icon == "rain" or weather_icon == "sleet":
-        return rain_animation()
+        anim = rain_animation()
+        return _with_stars(anim) if is_night else anim
     elif weather_icon == "snow":
-        return snow_animation()
+        anim = snow_animation()
+        return _with_stars(anim) if is_night else anim
     elif weather_icon == "clear-day":
         return sun_animation()
     elif weather_icon == "clear-night":
         return night_animation()
     elif weather_icon == "cloudy":
-        return cloud_animation()
+        anim = cloud_animation()
+        return _with_stars(anim) if is_night else anim
     elif weather_icon == "overcast":
-        return overcast_animation()
+        anim = overcast_animation()
+        return _with_stars(anim) if is_night else anim
     elif weather_icon == "partly-cloudy-day":
         return partly_cloudy_day_animation()
     elif weather_icon == "partly-cloudy-night":
         return partly_cloudy_night_animation()
     elif weather_icon == "wind":
-        return wind_animation()
+        anim = wind_animation()
+        return _with_stars(anim) if is_night else anim
     elif weather_icon == "fog":
-        return fog_animation()
+        anim = fog_animation()
+        return _with_stars(anim) if is_night else anim
     return None
 
 def rain_animation():
