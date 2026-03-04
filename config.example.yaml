@@ -1,0 +1,23 @@
+home_assistant:
+  url: "http://192.168.x.x:8123"
+  token: "your_long_lived_access_token"
+  sensors:
+    battery_pct: "sensor.powerwall_battery"
+    solar_power: "sensor.powerwall_solar_power"
+    load_power: "sensor.powerwall_load_power"
+    grid_power: "sensor.powerwall_grid_power"
+    grid_status: "binary_sensor.powerwall_grid_status"
+
+weather:
+  provider: "pirateweather"
+  api_key: "your_pirate_weather_api_key"
+  latitude: 28.5383
+  longitude: -81.3792
+
+tidbyt:
+  device_id: "your_tidbyt_device_id"
+  api_token: "your_tidbyt_api_token"
+  installation_id: "powerwall"
+
+schedule:
+  interval_seconds: 120
