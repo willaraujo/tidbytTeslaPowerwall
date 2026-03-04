@@ -176,7 +176,7 @@ def main(config):
     )
 
     return render.Root(
-        delay = 100,
+        delay = 200,
         child = display,
     )
 
