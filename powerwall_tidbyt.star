@@ -220,6 +220,13 @@ def main(config):
 
 # --- Pixel-art icons ---
 
+def _hex02(n):
+    """Zero-padded 2-digit hex. Starlark doesn't support %02x."""
+    h = "%x" % n
+    if len(h) < 2:
+        h = "0" + h
+    return h
+
 def _lerp_color(c1, c2, t):
     """Interpolate between two hex colors. t=0.0 returns c1, t=1.0 returns c2."""
     r1 = int(c1[1:3], 16)
@@ -231,7 +238,7 @@ def _lerp_color(c1, c2, t):
     r = int(r1 + (r2 - r1) * t)
     g = int(g1 + (g2 - g1) * t)
     b = int(b1 + (b2 - b1) * t)
-    return "#%02x%02x%02x" % (r, g, b)
+    return "#" + _hex02(r) + _hex02(g) + _hex02(b)
 
 def build_solar_icon(solar_power = 0, weather_icon = "clear-day"):
     """Solar panel with dynamic sun + weather overlays, in 20x16 box.
