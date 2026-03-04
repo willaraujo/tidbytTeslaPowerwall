@@ -124,11 +124,11 @@ def main(config):
         main_align = "space_between",
         cross_align = "center",
         children = [
-            render.Box(width = 21, height = 16, child = render.Row(
+            render.Box(width = 21, height = 13, child = render.Row(
                 main_align = "center",
                 children = [render.Image(src = HOUSE)],
             )),
-            render.Text(content = load_text, height = 8, font = "tb-8", color = load_color),
+            render.Text(content = load_text, height = 7, font = "tb-8", color = load_color),
             build_battery_bar(battery_pct),
         ],
     )
@@ -245,21 +245,14 @@ def build_battery_bar(battery_pct):
         ],
     )
 
-    # Percentage text to the right of the battery
-    if battery_pct >= 100:
-        pct_text = "100"
-    else:
-        pct_text = "%d%%" % battery_pct
+    # Percentage text below the battery
+    pct_text = "%d%%" % battery_pct
 
-    return render.Row(
-        main_align = "center",
+    return render.Column(
         cross_align = "center",
         children = [
             battery_icon,
-            render.Padding(
-                pad = (1, 0, 0, 0),
-                child = render.Text(content = pct_text, font = "tom-thumb", color = "#ffffff"),
-            ),
+            render.Text(content = pct_text, font = "tom-thumb", color = "#ffffff"),
         ],
     )
 
