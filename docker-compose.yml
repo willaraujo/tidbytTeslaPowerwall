@@ -1,0 +1,10 @@
+services:
+  powerwall-tidbyt:
+    build: .
+    container_name: powerwall-tidbyt
+    restart: unless-stopped
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    environment:
+      - CONFIG_PATH=/app/config.yaml
+      - TZ=America/New_York
