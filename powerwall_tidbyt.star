@@ -54,6 +54,20 @@ MOON_COLOR = "#CCCC88"
 WIND_COLOR = "#667788"
 FOG_COLOR = "#333333"
 
+# Battery bar gradient colors (8 segments, red → green)
+BATT_GRADIENT = [
+    "#ff0000",
+    "#ff4400",
+    "#ff8800",
+    "#ffcc00",
+    "#cccc00",
+    "#88cc00",
+    "#44cc00",
+    "#00cc00",
+]
+BATT_OUTLINE = "#555555"
+BATT_EMPTY = "#111111"
+
 def main(config):
     battery_pct = int(config.get("battery_pct", "0"))
     solar_power = float(config.get("solar_power", "0"))
@@ -83,14 +97,6 @@ def main(config):
     load_text = format_power(load_power)
     grid_text = format_power(grid_power)
 
-    # Battery color: red < 10%, yellow 10-20%, green > 20%
-    batt_color = "#00cc00"
-    if battery_pct < 10:
-        batt_color = "#ff0000"
-    elif battery_pct < 20:
-        batt_color = "#ffcc00"
-
-    batt_unit = "%d%%" % battery_pct
     solar_color = "#00cc00" if solar_power > 0 else "#666666"
 
     # Column 1: Solar / Weather
@@ -114,7 +120,7 @@ def main(config):
                 children = [render.Image(src = HOUSE)],
             )),
             render.Text(content = load_text, height = 8, font = "tb-8", color = "#ffd11a"),
-            render.Text(content = batt_unit, height = 8, font = "tb-8", color = batt_color),
+            build_battery_bar(battery_pct),
         ],
     )
 
@@ -180,6 +186,42 @@ def main(config):
     return render.Root(
         delay = 200,
         child = display,
+    )
+
+# --- Battery bar (outlined battery icon with gradient segments) ---
+
+def build_battery_bar(battery_pct):
+    """Build a battery icon: 17x7 outline body + 1px nub, 8 gradient segments inside."""
+    filled = int(battery_pct * 8 / 100)
+    if battery_pct > 0 and filled == 0:
+        filled = 1
+
+    # Build interior segment row (8 segments × 1px + 7 gaps × 1px = 15px)
+    segs = []
+    for i in range(8):
+        color = BATT_GRADIENT[i] if i < filled else BATT_EMPTY
+        segs.append(render.Box(width = 1, height = 5, color = color))
+        if i < 7:
+            segs.append(render.Box(width = 1, height = 5))
+
+    interior = render.Row(children = segs)
+
+    return render.Row(
+        children = [
+            render.Stack(
+                children = [
+                    render.Box(width = 17, height = 7, color = BATT_OUTLINE),
+                    render.Padding(
+                        pad = (1, 1, 1, 1),
+                        child = render.Box(width = 15, height = 5, color = "#000000", child = interior),
+                    ),
+                ],
+            ),
+            render.Padding(
+                pad = (0, 2, 0, 0),
+                child = render.Box(width = 1, height = 3, color = BATT_OUTLINE),
+            ),
+        ],
     )
 
 # --- Weather icons for column 1 (21x16 area) ---
