@@ -110,19 +110,21 @@ def main(config):
     else:
         load_color = "#ff4400"
 
-    # House icon with optional seasonal overlay (overlay in 24px space for room)
-    house_icon = build_house_icon()
-    seasonal = get_seasonal_overlay(config)
-    if seasonal:
-        house_box = render.Box(width = 24, height = 16, child = render.Stack(children = [
-            render.Row(main_align = "center", children = [house_icon]),
-            seasonal,
-        ]))
-    else:
-        house_box = render.Box(width = 24, height = 16, child = render.Row(
-            main_align = "center",
-            children = [house_icon],
+    # House icon + seasonal scene items in slot-based layout:
+    # [4px left scene] [16px house] [4px right scene] = 24px
+    seasonal = get_seasonal_name(config)
+    house_icon = build_house_icon(seasonal)
+    left_scene = build_left_scene(seasonal)
+    right_scene = build_right_scene(seasonal)
+    full_overlay = build_full_overlay(seasonal)
+
+    scene_row = render.Row(children = [left_scene, house_icon, right_scene])
+    if full_overlay:
+        house_box = render.Box(width = 24, height = 16, child = render.Stack(
+            children = [scene_row, full_overlay],
         ))
+    else:
+        house_box = render.Box(width = 24, height = 16, child = scene_row)
 
     col2 = render.Column(
         main_align = "space_between",
@@ -278,32 +280,32 @@ def build_solar_icon():
         ]),
     )
 
-def build_house_icon():
-    """House pixel art, 16x14, centered in 16x16 area."""
-    return render.Box(
-        width = 16,
-        height = 16,
-        child = render.Stack(
-            children = [
-                # Chimney (on right slope of roof, connects at y=4)
-                render.Padding(pad = (10, 2, 0, 0), child = render.Box(width = 2, height = 3, color = HOUSE_CHIMNEY)),
-                # Roof - wide triangle shape
-                render.Padding(pad = (6, 3, 0, 0), child = render.Box(width = 4, height = 1, color = HOUSE_ROOF)),
-                render.Padding(pad = (5, 4, 0, 0), child = render.Box(width = 6, height = 1, color = HOUSE_ROOF)),
-                render.Padding(pad = (4, 5, 0, 0), child = render.Box(width = 8, height = 1, color = HOUSE_ROOF)),
-                render.Padding(pad = (3, 6, 0, 0), child = render.Box(width = 10, height = 1, color = HOUSE_ROOF)),
-                render.Padding(pad = (2, 7, 0, 0), child = render.Box(width = 12, height = 1, color = HOUSE_ROOF)),
-                # Walls
-                render.Padding(pad = (3, 8, 0, 0), child = render.Box(width = 10, height = 6, color = HOUSE_WALL)),
-                # Window (left side, light blue glow)
-                render.Padding(pad = (4, 9, 0, 0), child = render.Box(width = 3, height = 3, color = HOUSE_WINDOW)),
-                # Door (right side)
-                render.Padding(pad = (9, 10, 0, 0), child = render.Box(width = 3, height = 4, color = HOUSE_DOOR)),
-                # Foundation
-                render.Padding(pad = (2, 14, 0, 0), child = render.Box(width = 12, height = 1, color = HOUSE_FOUNDATION)),
-            ],
-        ),
-    )
+def build_house_icon(seasonal = ""):
+    """House pixel art, 16x16. Seasonal decorations built in (same coords as house)."""
+    children = [
+        # Chimney (on right slope of roof, connects at y=4)
+        render.Padding(pad = (10, 2, 0, 0), child = render.Box(width = 2, height = 3, color = HOUSE_CHIMNEY)),
+        # Roof - wide triangle shape
+        render.Padding(pad = (6, 3, 0, 0), child = render.Box(width = 4, height = 1, color = HOUSE_ROOF)),
+        render.Padding(pad = (5, 4, 0, 0), child = render.Box(width = 6, height = 1, color = HOUSE_ROOF)),
+        render.Padding(pad = (4, 5, 0, 0), child = render.Box(width = 8, height = 1, color = HOUSE_ROOF)),
+        render.Padding(pad = (3, 6, 0, 0), child = render.Box(width = 10, height = 1, color = HOUSE_ROOF)),
+        render.Padding(pad = (2, 7, 0, 0), child = render.Box(width = 12, height = 1, color = HOUSE_ROOF)),
+        # Walls
+        render.Padding(pad = (3, 8, 0, 0), child = render.Box(width = 10, height = 6, color = HOUSE_WALL)),
+        # Window (left side, light blue glow)
+        render.Padding(pad = (4, 9, 0, 0), child = render.Box(width = 3, height = 3, color = HOUSE_WINDOW)),
+        # Door (right side)
+        render.Padding(pad = (9, 10, 0, 0), child = render.Box(width = 3, height = 4, color = HOUSE_DOOR)),
+        # Foundation
+        render.Padding(pad = (2, 14, 0, 0), child = render.Box(width = 12, height = 1, color = HOUSE_FOUNDATION)),
+    ]
+
+    # Seasonal house decorations (same coordinate system — moves with house)
+    if seasonal == "christmas":
+        children.extend(_house_christmas_decor())
+
+    return render.Box(width = 16, height = 16, child = render.Stack(children = children))
 
 def build_grid_icon():
     """Power pylon pixel art, centered in 20x16 box."""
@@ -388,12 +390,14 @@ def build_battery_bar(battery_pct):
         ],
     )
 
-# --- Seasonal easter eggs ---
+# --- Seasonal system: slot-based composition ---
+# House decorations (snow, lights) are built INTO the house icon.
+# Scene items (tree, snowman, pumpkin, turkey) are self-contained 4x16 boxes
+# placed in left/right margin slots beside the house.
+# Full overlays (firework, bat) span the entire 24x16 area.
 
-def get_seasonal_overlay(config):
-    """Return seasonal decoration overlay or None.
-    Server sends 'seasonal' config: 'christmas', 'july4', 'halloween',
-    'thanksgiving', or 'auto' (use month/day). Send any value to test."""
+def get_seasonal_name(config):
+    """Resolve seasonal name from config or auto-detect from date."""
     seasonal = config.get("seasonal", "")
 
     if seasonal == "" or seasonal == "auto":
@@ -408,30 +412,44 @@ def get_seasonal_overlay(config):
         elif month == 11 and day >= 20 and day <= 30:
             seasonal = "thanksgiving"
 
+    return seasonal
+
+def build_left_scene(seasonal):
+    """Left margin scene item (4x16 box). Independent of house."""
     if seasonal == "christmas":
-        return _christmas_overlay()
-    elif seasonal == "july4":
-        return _firework_overlay()
+        return _build_christmas_tree()
     elif seasonal == "halloween":
-        return _halloween_overlay()
+        return _build_pumpkin()
     elif seasonal == "thanksgiving":
-        return _thanksgiving_overlay()
+        return _build_turkey()
+    return render.Box(width = 4, height = 16)
+
+def build_right_scene(seasonal):
+    """Right margin scene item (4x16 box). Independent of house."""
+    if seasonal == "christmas":
+        return _build_snowman()
+    return render.Box(width = 4, height = 16)
+
+def build_full_overlay(seasonal):
+    """Full 24x16 overlay for wide animations, or None."""
+    if seasonal == "july4":
+        return _build_firework()
+    elif seasonal == "halloween":
+        return _build_bat()
     return None
 
-def _christmas_overlay():
-    """Snow, twinkling lights, snowman, tree, present — in 24px col2 space.
-    House is 16px centered in 24px, so house x=0 maps to overlay x=4."""
-    # Twinkling Christmas lights along eave (house eave at overlay x=6-17, y=7)
-    # Lights at y=8 just below eave, alternating red/green with twinkle
+# --- House decorations (use house coordinate system) ---
+
+def _house_christmas_decor():
+    """Snow on roof + twinkling lights — uses same coords as house."""
     lights_a = render.Stack(children = [
+        render.Padding(pad = (3, 8, 0, 0), child = render.Box(width = 1, height = 1, color = "#ff0000")),
         render.Padding(pad = (7, 8, 0, 0), child = render.Box(width = 1, height = 1, color = "#ff0000")),
         render.Padding(pad = (11, 8, 0, 0), child = render.Box(width = 1, height = 1, color = "#ff0000")),
-        render.Padding(pad = (15, 8, 0, 0), child = render.Box(width = 1, height = 1, color = "#ff0000")),
     ])
     lights_b = render.Stack(children = [
+        render.Padding(pad = (5, 8, 0, 0), child = render.Box(width = 1, height = 1, color = "#00ff00")),
         render.Padding(pad = (9, 8, 0, 0), child = render.Box(width = 1, height = 1, color = "#00ff00")),
-        render.Padding(pad = (13, 8, 0, 0), child = render.Box(width = 1, height = 1, color = "#00ff00")),
-        render.Padding(pad = (17, 8, 0, 0), child = render.Box(width = 1, height = 1, color = "#00ff00")),
     ])
 
     twinkling_a = animation.Transformation(
@@ -457,48 +475,97 @@ def _christmas_overlay():
         ],
     )
 
-    return render.Stack(
-        children = [
-            # Snow ON roof peak (overlay coords: roof peak at x=10-13, y=3)
-            render.Padding(pad = (10, 3, 0, 0), child = render.Box(width = 4, height = 1, color = "#ffffff")),
-            # Snow drips on exposed roof edges
-            render.Padding(pad = (9, 4, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffffff")),
-            render.Padding(pad = (14, 4, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffffff")),
-            # Twinkling Christmas lights
-            twinkling_a,
-            twinkling_b,
-            # Christmas tree (left side, x=0-3, y=7-14)
-            render.Padding(pad = (2, 7, 0, 0), child = render.Box(width = 1, height = 1, color = "#006600")),
-            render.Padding(pad = (1, 8, 0, 0), child = render.Box(width = 3, height = 1, color = "#008800")),
-            render.Padding(pad = (1, 9, 0, 0), child = render.Box(width = 1, height = 1, color = "#006600")),
-            render.Padding(pad = (3, 9, 0, 0), child = render.Box(width = 1, height = 1, color = "#006600")),
-            render.Padding(pad = (0, 10, 0, 0), child = render.Box(width = 5, height = 1, color = "#008800")),
-            render.Padding(pad = (0, 11, 0, 0), child = render.Box(width = 1, height = 1, color = "#006600")),
-            render.Padding(pad = (4, 11, 0, 0), child = render.Box(width = 1, height = 1, color = "#006600")),
-            render.Padding(pad = (0, 12, 0, 0), child = render.Box(width = 5, height = 1, color = "#008800")),
-            render.Padding(pad = (2, 13, 0, 0), child = render.Box(width = 1, height = 2, color = "#885522")),
-            # Tree star
-            render.Padding(pad = (2, 6, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffcc00")),
-            # Tree ornaments
-            render.Padding(pad = (2, 9, 0, 0), child = render.Box(width = 1, height = 1, color = "#ff0000")),
-            render.Padding(pad = (1, 11, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffcc00")),
-            render.Padding(pad = (3, 12, 0, 0), child = render.Box(width = 1, height = 1, color = "#ff0000")),
-            # Snowman (right side, x=19-22)
-            render.Padding(pad = (20, 8, 0, 0), child = render.Box(width = 2, height = 1, color = "#333333")),
-            render.Padding(pad = (19, 9, 0, 0), child = render.Box(width = 4, height = 1, color = "#333333")),
-            render.Padding(pad = (19, 10, 0, 0), child = render.Box(width = 3, height = 1, color = "#ffffff")),
-            render.Padding(pad = (19, 10, 0, 0), child = render.Box(width = 1, height = 1, color = "#000000")),
-            render.Padding(pad = (22, 10, 0, 0), child = render.Box(width = 1, height = 1, color = "#ff8800")),
-            render.Padding(pad = (19, 11, 0, 0), child = render.Box(width = 3, height = 1, color = "#ff0000")),
-            render.Padding(pad = (19, 12, 0, 0), child = render.Box(width = 3, height = 2, color = "#ffffff")),
-            # Present (right of tree, at base)
-            render.Padding(pad = (5, 13, 0, 0), child = render.Box(width = 2, height = 2, color = "#ff0000")),
-            render.Padding(pad = (5, 14, 0, 0), child = render.Box(width = 2, height = 1, color = "#ffcc00")),
-            render.Padding(pad = (6, 13, 0, 0), child = render.Box(width = 1, height = 2, color = "#ffcc00")),
-        ],
+    return [
+        # Snow on roof peak (same coords as roof at y=3)
+        render.Padding(pad = (6, 3, 0, 0), child = render.Box(width = 4, height = 1, color = "#ffffff")),
+        render.Padding(pad = (5, 4, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffffff")),
+        render.Padding(pad = (10, 4, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffffff")),
+        # Twinkling lights below eave
+        twinkling_a,
+        twinkling_b,
+    ]
+
+# --- Self-contained scene items (all coords relative to own 4x16 box) ---
+
+def _build_christmas_tree():
+    """Christmas tree in 4x16 box."""
+    return render.Box(
+        width = 4,
+        height = 16,
+        child = render.Stack(children = [
+            # Star
+            render.Padding(pad = (1, 5, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffcc00")),
+            # Tree body (tiered triangle)
+            render.Padding(pad = (1, 6, 0, 0), child = render.Box(width = 1, height = 1, color = "#008800")),
+            render.Padding(pad = (0, 7, 0, 0), child = render.Box(width = 3, height = 1, color = "#008800")),
+            render.Padding(pad = (0, 8, 0, 0), child = render.Box(width = 4, height = 1, color = "#006600")),
+            render.Padding(pad = (1, 9, 0, 0), child = render.Box(width = 2, height = 1, color = "#008800")),
+            render.Padding(pad = (0, 10, 0, 0), child = render.Box(width = 4, height = 1, color = "#006600")),
+            render.Padding(pad = (0, 11, 0, 0), child = render.Box(width = 4, height = 1, color = "#008800")),
+            render.Padding(pad = (0, 12, 0, 0), child = render.Box(width = 4, height = 1, color = "#006600")),
+            # Trunk
+            render.Padding(pad = (1, 13, 0, 0), child = render.Box(width = 1, height = 2, color = "#885522")),
+            # Ornaments
+            render.Padding(pad = (0, 8, 0, 0), child = render.Box(width = 1, height = 1, color = "#ff0000")),
+            render.Padding(pad = (3, 10, 0, 0), child = render.Box(width = 1, height = 1, color = "#ffcc00")),
+            render.Padding(pad = (1, 12, 0, 0), child = render.Box(width = 1, height = 1, color = "#ff0000")),
+        ]),
     )
 
-def _firework_overlay():
+def _build_snowman():
+    """Snowman in 4x16 box."""
+    return render.Box(
+        width = 4,
+        height = 16,
+        child = render.Stack(children = [
+            # Hat
+            render.Padding(pad = (1, 7, 0, 0), child = render.Box(width = 2, height = 1, color = "#333333")),
+            render.Padding(pad = (0, 8, 0, 0), child = render.Box(width = 4, height = 1, color = "#333333")),
+            # Head
+            render.Padding(pad = (1, 9, 0, 0), child = render.Box(width = 2, height = 1, color = "#ffffff")),
+            render.Padding(pad = (1, 9, 0, 0), child = render.Box(width = 1, height = 1, color = "#000000")),
+            render.Padding(pad = (3, 9, 0, 0), child = render.Box(width = 1, height = 1, color = "#ff8800")),
+            # Scarf
+            render.Padding(pad = (1, 10, 0, 0), child = render.Box(width = 2, height = 1, color = "#ff0000")),
+            # Body
+            render.Padding(pad = (0, 11, 0, 0), child = render.Box(width = 3, height = 3, color = "#ffffff")),
+        ]),
+    )
+
+def _build_pumpkin():
+    """Jack-o-lantern in 4x16 box."""
+    return render.Box(
+        width = 4,
+        height = 16,
+        child = render.Stack(children = [
+            render.Padding(pad = (1, 11, 0, 0), child = render.Box(width = 1, height = 1, color = "#44aa00")),
+            render.Padding(pad = (0, 12, 0, 0), child = render.Box(width = 3, height = 2, color = "#ff8800")),
+            render.Padding(pad = (0, 13, 0, 0), child = render.Box(width = 1, height = 1, color = "#000000")),
+            render.Padding(pad = (2, 13, 0, 0), child = render.Box(width = 1, height = 1, color = "#000000")),
+        ]),
+    )
+
+def _build_turkey():
+    """Turkey in 4x16 box."""
+    return render.Box(
+        width = 4,
+        height = 16,
+        child = render.Stack(children = [
+            # Tail feathers
+            render.Padding(pad = (0, 10, 0, 0), child = render.Box(width = 1, height = 1, color = "#dd6600")),
+            render.Padding(pad = (1, 9, 0, 0), child = render.Box(width = 1, height = 2, color = "#ddaa00")),
+            render.Padding(pad = (2, 10, 0, 0), child = render.Box(width = 1, height = 1, color = "#cc3300")),
+            # Body
+            render.Padding(pad = (0, 11, 0, 0), child = render.Box(width = 3, height = 2, color = "#884422")),
+            # Head + wattle
+            render.Padding(pad = (3, 11, 0, 0), child = render.Box(width = 1, height = 1, color = "#884422")),
+            render.Padding(pad = (3, 12, 0, 0), child = render.Box(width = 1, height = 1, color = "#cc0000")),
+        ]),
+    )
+
+# --- Full overlays (span entire 24x16 col2 area) ---
+
+def _build_firework():
     """Bottle rocket launch with colorful burst."""
     firework_colors = ["#ffcc00", "#ff44ff", "#00ffcc", "#ff8800", "#88ff00"]
 
@@ -520,7 +587,7 @@ def _firework_overlay():
         ),
     )
 
-    # Burst sparks (appear at top after rocket arrives)
+    # Burst sparks
     spark_positions = [(-2, -1), (2, -1), (-1, -2), (1, -2), (0, -3), (-3, 0), (3, 0)]
     for i, pos in enumerate(spark_positions):
         color = firework_colors[i % len(firework_colors)]
@@ -545,53 +612,24 @@ def _firework_overlay():
 
     return render.Stack(children = children)
 
-def _halloween_overlay():
-    """Pumpkin next to house + bat flying above."""
-    return render.Stack(
-        children = [
-            # Pumpkin body (orange)
-            render.Padding(pad = (0, 12, 0, 0), child = render.Box(width = 3, height = 3, color = "#ff8800")),
-            # Pumpkin stem (green)
-            render.Padding(pad = (1, 11, 0, 0), child = render.Box(width = 1, height = 1, color = "#44aa00")),
-            # Pumpkin eyes (dark)
-            render.Padding(pad = (0, 13, 0, 0), child = render.Box(width = 1, height = 1, color = "#000000")),
-            render.Padding(pad = (2, 13, 0, 0), child = render.Box(width = 1, height = 1, color = "#000000")),
-            # Bat flying above (oscillating)
-            animation.Transformation(
-                child = render.Padding(
-                    pad = (0, 2, 0, 0),
-                    child = render.Row(children = [
-                        render.Box(width = 2, height = 1, color = "#222222"),
-                        render.Box(width = 1, height = 1, color = "#333333"),
-                        render.Box(width = 2, height = 1, color = "#222222"),
-                    ]),
-                ),
-                duration = 20,
-                delay = 0,
-                direction = "alternate",
-                fill_mode = "forwards",
-                keyframes = [
-                    animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(-2, 0)], curve = "ease_in_out"),
-                    animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(12, 0)]),
-                ],
-            ),
-        ],
-    )
-
-def _thanksgiving_overlay():
-    """Turkey next to house."""
-    return render.Stack(
-        children = [
-            # Tail feathers (fan shape, fall colors)
-            render.Padding(pad = (0, 10, 0, 0), child = render.Box(width = 1, height = 1, color = "#dd6600")),
-            render.Padding(pad = (1, 9, 0, 0), child = render.Box(width = 1, height = 2, color = "#ddaa00")),
-            render.Padding(pad = (2, 10, 0, 0), child = render.Box(width = 1, height = 1, color = "#cc3300")),
-            # Body (brown)
-            render.Padding(pad = (0, 11, 0, 0), child = render.Box(width = 3, height = 3, color = "#884422")),
-            # Head (extends right)
-            render.Padding(pad = (3, 11, 0, 0), child = render.Box(width = 1, height = 1, color = "#884422")),
-            # Red wattle
-            render.Padding(pad = (3, 12, 0, 0), child = render.Box(width = 1, height = 1, color = "#cc0000")),
+def _build_bat():
+    """Bat flying across 24x16 area."""
+    return animation.Transformation(
+        child = render.Padding(
+            pad = (0, 2, 0, 0),
+            child = render.Row(children = [
+                render.Box(width = 2, height = 1, color = "#222222"),
+                render.Box(width = 1, height = 1, color = "#333333"),
+                render.Box(width = 2, height = 1, color = "#222222"),
+            ]),
+        ),
+        duration = 20,
+        delay = 0,
+        direction = "alternate",
+        fill_mode = "forwards",
+        keyframes = [
+            animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(-2, 0)], curve = "ease_in_out"),
+            animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(20, 0)]),
         ],
     )
 
