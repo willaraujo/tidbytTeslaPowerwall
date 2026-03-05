@@ -1528,17 +1528,22 @@ def build_life_overlay(config):
     return render.Box(width = 64, height = 32, child = render.Stack(children = children))
 
 # --- Game overlay: persistent survival simulation rendering ---
-# All game entities render in the BOTTOM HALF (y=17-31) of the 64x32 display.
-# Text/numbers in col2/col3 are treated as obstacles. Col1 is the main game area at night.
+# CRITICAL RULE: Game entities NEVER overlap info displays (text, numbers, battery).
+# Col2 (x=20-43) and Col3 (x=44-63) bottom halves are RESERVED for data readouts.
+# Game entities ONLY render in col1 (x=0-19) when col1 is clear (night / no solar).
+# Entities clamp to x=0-19 for rendering even if game engine x exceeds that.
 
 # Speed → animation duration mapping (behavioral cues, no stats shown)
 GAME_SPEED_DUR = {"slow": 140, "mid": 80, "fast": 50}
 GAME_SHIRTS = {"parent1": "#4488cc", "parent2": "#cc4444", "kid": "#44cc44"}
 
-# Game area y-coordinates (bottom half of display)
-GAME_WALK_Y = 17       # Character walking level (just below icons, above text obstacles)
-GAME_FARM_Y = 20       # Character farming level (in col1 open area)
-GAME_FISH_Y = 23       # Fishing position (at pond edge)
+# Game area boundaries — col1 only, bottom half
+GAME_X_MIN = 0            # Left edge of game area
+GAME_X_MAX = 19           # Right edge of game area (col1 boundary)
+GAME_WALK_Y = 17          # Character walking level
+GAME_FARM_Y = 20          # Character farming level (in col1 open area)
+GAME_FISH_Y = 23          # Fishing position (at pond edge)
+GAME_GRAVE_Y = 18         # Gravestone y-position
 
 # Flower color: bright magenta — distinct from all other colors in the palette
 FLOWER_COLOR = "#FF44FF"
@@ -1548,8 +1553,17 @@ FLOWER_STEM = "#22AA22"
 POND_RENDER_X = 3
 POND_RENDER_Y = 24
 
+def _clamp_game_x(x):
+    """Clamp x to the safe game rendering area (col1 only)."""
+    if x < GAME_X_MIN:
+        return GAME_X_MIN
+    if x > GAME_X_MAX:
+        return GAME_X_MAX
+    return x
+
 def _build_game_overlay(config):
-    """Parse game state params and render characters, threats, crops, pond in the bottom half."""
+    """Parse game state params and render ALL entities within col1 bounds only.
+    Nothing renders over col2/col3 info displays."""
     children = []
 
     # Pond: render water area when active (rainstorm + col1 not occupied by solar text)
@@ -1572,12 +1586,12 @@ def _build_game_overlay(config):
             if len(parts) >= 6:
                 children.extend(_render_game_char(parts))
 
-    # Pets: "id:x:alive"
+    # Pets: "id:x:alive:deployed"
     gp = config.get("gp", "")
     if gp:
         for entry in gp.split("|"):
             parts = entry.split(":")
-            if len(parts) >= 3:
+            if len(parts) >= 4:
                 children.extend(_render_game_pet(parts))
 
     # Threats: "type:x:state:dir"
@@ -1593,10 +1607,10 @@ def _build_game_overlay(config):
     return render.Box(width = 64, height = 32, child = render.Stack(children = children))
 
 def _render_game_char(parts):
-    """Render one game character in the bottom half — behavior only, no stats."""
+    """Render one game character — clamped to col1 game area, never overlapping info."""
     char_id = parts[0]
-    x = int(parts[1])
-    target_x = int(parts[2])
+    x = _clamp_game_x(int(parts[1]))
+    target_x = _clamp_game_x(int(parts[2]))
     state = parts[3]
     alive = parts[4] == "1"
     speed = parts[5]
@@ -1605,16 +1619,16 @@ def _render_game_char(parts):
     children = []
 
     if not alive:
-        # Gravestone cross in the bottom area near house
-        gx = 26 if char_id == "parent1" else (30 if char_id == "parent2" else 34)
-        children.append(render.Padding(pad = (gx, GAME_WALK_Y, 0, 0), child = render.Box(width = 1, height = 3, color = "#666666")))
-        children.append(render.Padding(pad = (gx - 1, GAME_WALK_Y + 1, 0, 0), child = render.Box(width = 3, height = 1, color = "#666666")))
+        # Gravestone cross — spaced within col1 area
+        gx = 4 if char_id == "parent1" else (9 if char_id == "parent2" else 14)
+        children.append(render.Padding(pad = (gx, GAME_GRAVE_Y, 0, 0), child = render.Box(width = 1, height = 3, color = "#666666")))
+        children.append(render.Padding(pad = (gx - 1, GAME_GRAVE_Y + 1, 0, 0), child = render.Box(width = 3, height = 1, color = "#666666")))
         return children
 
     dur = GAME_SPEED_DUR.get(speed, 80)
 
     if state == "fighting":
-        # Rapid jitter at threat position in the bottom half
+        # Rapid jitter at threat position
         children.append(animation.Transformation(
             child = _pixel_person(0, GAME_WALK_Y, shirt),
             duration = 8,
@@ -1659,7 +1673,7 @@ def _render_game_char(parts):
             ],
         ))
     elif state == "fleeing":
-        # Double-speed dash toward home
+        # Double-speed dash toward safe area
         children.append(_walking_person(shirt, x, target_x, GAME_WALK_Y, 40))
     elif x != target_x:
         # Walking to target at speed determined by HP (hidden)
@@ -1671,11 +1685,12 @@ def _render_game_char(parts):
     return children
 
 def _render_game_pet(parts):
-    """Render game pet (dog/cat) in the bottom half."""
+    """Render game pet — only when deployed, clamped to col1."""
     pet_id = parts[0]
-    x = int(parts[1])
+    x = _clamp_game_x(int(parts[1]))
     alive = parts[2] == "1"
-    if not alive:
+    deployed = parts[3] == "1" if len(parts) >= 4 else False
+    if not alive or not deployed:
         return []
     if pet_id == "dog":
         return [_pixel_dog(x, GAME_WALK_Y + 1)]
@@ -1696,9 +1711,9 @@ def _pixel_alien(x, y):
     ])
 
 def _render_game_threat(parts):
-    """Render approaching threat in the bottom half with menacing animation."""
+    """Render approaching threat — clamped to col1 game area."""
     threat_type = parts[0]
-    x = int(parts[1])
+    x = _clamp_game_x(int(parts[1]))
     direction = int(parts[3]) if len(parts) >= 4 else -1
     children = []
 
@@ -1706,7 +1721,7 @@ def _render_game_threat(parts):
     shake_dx = -1 if direction < 0 else 1
 
     if threat_type == "yeti":
-        # Yeti stomps from the right
+        # Yeti stomps in from the right edge of col1
         children.append(animation.Transformation(
             child = _pixel_yeti(0, GAME_WALK_Y - 1),
             duration = 15,
@@ -1719,7 +1734,7 @@ def _render_game_threat(parts):
             ],
         ))
     elif threat_type == "alien":
-        # Little green man from the left — sneaky approach
+        # Little green man sneaks in from the left
         children.append(animation.Transformation(
             child = _pixel_alien(0, GAME_WALK_Y),
             duration = 12,
