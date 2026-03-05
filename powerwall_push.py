@@ -543,9 +543,12 @@ class GameEngine:
         # 5. PLANT — empty slot, night, have food
         if is_night and self.state["world"]["food"] > 20 and threat_dist > 8:
             used_xs = {c["x"] for c in self.state["world"]["crops"]}
-            empty_slots = [s for s in CROP_SLOTS if s[0] not in used_xs]
+            busy_plant = {c["target_x"] for c in self.state["characters"]
+                          if c["alive"] and c["id"] != char["id"] and c["state"] == "farming"}
+            empty_slots = [s for s in CROP_SLOTS if s[0] not in used_xs and s[0] not in busy_plant]
             if empty_slots:
-                slot_x, slot_y = empty_slots[0]
+                # Pick nearest empty slot to this character
+                slot_x, slot_y = min(empty_slots, key=lambda s: abs(char["x"] - s[0]))
                 if abs(char["x"] - slot_x) <= 2:
                     # At slot — plant, then return home
                     self.state["world"]["crops"].append({
