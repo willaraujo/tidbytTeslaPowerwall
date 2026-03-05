@@ -508,13 +508,13 @@ class GameEngine:
             char["target_x"] = nearest["x"]
             return
 
-        # 4. HARVEST — ripe crops at night (only one char per crop)
+        # 4. HARVEST — ripe crops any time (only one char per crop)
         harvestable = [c for c in self.state["world"]["crops"] if c["stage"] >= 3]
         # Filter out crops another character is already heading to
         busy_targets = {c["target_x"] for c in self.state["characters"]
                         if c["alive"] and c["id"] != char["id"] and c["state"] == "farming"}
         available_crops = [c for c in harvestable if c["x"] not in busy_targets]
-        if available_crops and is_night and self.state["world"]["food"] < 50:
+        if available_crops and self.state["world"]["food"] < 50:
             crop = min(available_crops, key=lambda c: abs(char["x"] - c["x"]))
             if abs(char["x"] - crop["x"]) <= 2:
                 # At crop — harvest then return home with supplies
@@ -524,11 +524,8 @@ class GameEngine:
                 bonus = 5 if char["trait"] == "cautious" else 0
                 total = base_yield + distance_bonus + bonus
                 self.state["world"]["food"] = min(MAX_FOOD, self.state["world"]["food"] + total)
-                # Auto-replant: reset to seed stage, new growth rate
-                crop["stage"] = 0
-                crop["planted_tick"] = self.state["tick"]
-                crop["stage_tick"] = self.state["tick"]
-                crop["growth_rate"] = round(random.uniform(0.7, 1.3), 2)
+                # Remove the harvested crop (despawn)
+                self.state["world"]["crops"].remove(crop)
                 # Return home with supplies — won't take new tasks until home
                 char["state"] = "returning"
                 char["target_x"] = my_home
@@ -547,8 +544,9 @@ class GameEngine:
                           if c["alive"] and c["id"] != char["id"] and c["state"] == "farming"}
             empty_slots = [s for s in CROP_SLOTS if s[0] not in used_xs and s[0] not in busy_plant]
             if empty_slots:
-                # Pick nearest empty slot to this character
-                slot_x, slot_y = min(empty_slots, key=lambda s: abs(char["x"] - s[0]))
+                # Round-robin slot assignment so crops spread across col1
+                slot_idx = self.state["tick"] % len(empty_slots)
+                slot_x, slot_y = empty_slots[slot_idx]
                 if abs(char["x"] - slot_x) <= 2:
                     # At slot — plant, then return home
                     self.state["world"]["crops"].append({
