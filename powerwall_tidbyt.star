@@ -148,11 +148,7 @@ def main(config):
         )
     else:
         # WEATHER MODE: full-height scene, NO text
-        col1 = render.Box(
-            width = 20,
-            height = 32,
-            child = build_weather_scene(weather_icon, sun_elevation, is_night),
-        )
+        col1 = build_weather_scene(weather_icon, sun_elevation, is_night)
 
     # Column 2: Home + battery bar (load color = green/amber/red by usage)
     if load_power < LOAD_LOW_W:
@@ -556,7 +552,7 @@ def build_house_icon(seasonal = "", is_night = False):
         # Window (left side)
         render.Padding(pad = (4, 9, 0, 0), child = render.Box(width = 3, height = 3, color = window_color)),
         # Interior light behind door (visible when door opens)
-        render.Padding(pad = (9, 10, 0, 0), child = render.Box(width = 3, height = 4, color = "#554411")),
+        render.Padding(pad = (9, 10, 0, 0), child = render.Box(width = 3, height = 4, color = "#886622")),
         # Foundation
         render.Padding(pad = (2, 14, 0, 0), child = render.Box(width = 12, height = 1, color = HOUSE_FOUNDATION)),
     ]
@@ -570,18 +566,18 @@ def build_house_icon(seasonal = "", is_night = False):
         direction = "normal",
         fill_mode = "forwards",
         keyframes = [
-            animation.Keyframe(percentage = 0.0, transforms = [animation.Scale(1.0, 1.0)]),
-            animation.Keyframe(percentage = 0.70, transforms = [animation.Scale(1.0, 1.0)]),
-            animation.Keyframe(percentage = 0.78, transforms = [animation.Scale(0.15, 1.0)]),
-            animation.Keyframe(percentage = 0.88, transforms = [animation.Scale(0.15, 1.0)]),
-            animation.Keyframe(percentage = 0.95, transforms = [animation.Scale(1.0, 1.0)]),
-            animation.Keyframe(percentage = 1.0, transforms = [animation.Scale(1.0, 1.0)]),
+            animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(0, 0)]),
+            animation.Keyframe(percentage = 0.70, transforms = [animation.Translate(0, 0)]),
+            animation.Keyframe(percentage = 0.78, transforms = [animation.Translate(3, 0)]),
+            animation.Keyframe(percentage = 0.88, transforms = [animation.Translate(3, 0)]),
+            animation.Keyframe(percentage = 0.95, transforms = [animation.Translate(0, 0)]),
+            animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(0, 0)]),
         ],
     ))
 
-    # Night: dim warm interior glow inside window
+    # Night: warm interior glow inside window
     if is_night:
-        children.append(render.Padding(pad = (5, 10, 0, 0), child = render.Box(width = 1, height = 1, color = "#665522")))
+        children.append(render.Padding(pad = (5, 10, 0, 0), child = render.Box(width = 2, height = 2, color = "#aa8833")))
 
     # Seasonal house decorations (same coordinate system — moves with house)
     if seasonal == "christmas":
@@ -1396,19 +1392,117 @@ def _scene_yeti():
     ))
     return children
 
+def _scene_pond_fishing():
+    """Pond with fisher during rainy night."""
+    children = []
+    # Pond water surface
+    children.append(render.Padding(pad = (2, 13, 0, 0), child = render.Box(width = 12, height = 2, color = "#224466")))
+    # Pond shimmer
+    children.append(render.Padding(pad = (5, 13, 0, 0), child = render.Box(width = 3, height = 1, color = "#335577")))
+    # Reeds at edges
+    children.append(render.Padding(pad = (1, 11, 0, 0), child = render.Box(width = 1, height = 3, color = "#226622")))
+    children.append(render.Padding(pad = (15, 11, 0, 0), child = render.Box(width = 1, height = 3, color = "#226622")))
+    # Fisher person sitting at edge
+    children.append(render.Padding(pad = (10, 10, 0, 0), child = render.Box(width = 1, height = 1, color = CHAR_SKIN)))
+    children.append(render.Padding(pad = (9, 11, 0, 0), child = render.Box(width = 3, height = 1, color = CHAR_PARENT1_SHIRT)))
+    children.append(render.Padding(pad = (9, 12, 0, 0), child = render.Box(width = 2, height = 1, color = CHAR_PANTS)))
+    # Fishing rod
+    children.append(render.Padding(pad = (12, 9, 0, 0), child = render.Box(width = 1, height = 1, color = "#885533")))
+    children.append(render.Padding(pad = (12, 10, 0, 0), child = render.Box(width = 1, height = 4, color = "#885533")))
+    # Tiny fish bobbing in water
+    children.append(animation.Transformation(
+        child = render.Padding(pad = (6, 14, 0, 0), child = render.Box(width = 2, height = 1, color = "#ff8844")),
+        duration = 40,
+        delay = 20,
+        direction = "alternate",
+        fill_mode = "forwards",
+        keyframes = [
+            animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(0, 0)], curve = "ease_in_out"),
+            animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(4, 0)]),
+        ],
+    ))
+    return children
+
+def _scene_snowball():
+    """Kid throws snowball across screen during snow."""
+    children = []
+    # Kid standing
+    children.append(_pixel_person(25, 11, CHAR_KID_SHIRT))
+    # Snowball arc animation
+    children.append(animation.Transformation(
+        child = render.Padding(pad = (0, 0, 0, 0), child = render.Box(width = 2, height = 2, color = "#ffffff")),
+        duration = 40,
+        delay = 10,
+        direction = "normal",
+        fill_mode = "forwards",
+        keyframes = [
+            animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(28, 12)]),
+            animation.Keyframe(percentage = 0.5, transforms = [animation.Translate(40, 6)]),
+            animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(52, 12)]),
+        ],
+    ))
+    return children
+
+def _scene_fireworks():
+    """Fireworks burst in the sky during clear nights."""
+    children = []
+    # Rocket goes up
+    children.append(animation.Transformation(
+        child = render.Padding(pad = (0, 0, 0, 0), child = render.Box(width = 1, height = 2, color = "#ffaa00")),
+        duration = 60,
+        delay = 0,
+        direction = "normal",
+        fill_mode = "forwards",
+        keyframes = [
+            animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(32, 14)]),
+            animation.Keyframe(percentage = 0.3, transforms = [animation.Translate(32, 3)]),
+            animation.Keyframe(percentage = 0.35, transforms = [animation.Translate(32, 3), animation.Scale(0.0, 0.0)]),
+            animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(32, 3), animation.Scale(0.0, 0.0)]),
+        ],
+    ))
+    # Burst particles in 4 directions
+    burst_configs = [(3, 0, "#ff4444"), (-3, 0, "#44ff44"), (0, -3, "#4444ff"), (2, 2, "#ffff44")]
+    for dx, dy, color in burst_configs:
+        children.append(animation.Transformation(
+            child = render.Padding(pad = (0, 0, 0, 0), child = render.Box(width = 1, height = 1, color = color)),
+            duration = 60,
+            delay = 0,
+            direction = "normal",
+            fill_mode = "forwards",
+            keyframes = [
+                animation.Keyframe(percentage = 0.0, transforms = [animation.Scale(0.0, 0.0)]),
+                animation.Keyframe(percentage = 0.30, transforms = [animation.Scale(0.0, 0.0)]),
+                animation.Keyframe(percentage = 0.35, transforms = [animation.Translate(32, 3), animation.Scale(1.0, 1.0)]),
+                animation.Keyframe(percentage = 0.7, transforms = [animation.Translate(32 + dx, 3 + dy)]),
+                animation.Keyframe(percentage = 0.75, transforms = [animation.Translate(32 + dx, 3 + dy), animation.Scale(0.0, 0.0)]),
+                animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(32 + dx, 3 + dy), animation.Scale(0.0, 0.0)]),
+            ],
+        ))
+    return children
+
 def _activity_seed(config):
-    """Deterministic pseudo-random seed from power values."""
-    b = int(config.get("battery_pct", "0"))
-    s = int(float(config.get("solar_power", "0")))
-    l = int(float(config.get("load_power", "0")))
-    g = int(float(config.get("grid_power", "0")))
-    return (b * 7 + s * 13 + l * 19 + g * 23) % 100
+    """Deterministic seed from date+hour. Changes hourly for stable characters."""
+    m = int(config.get("month", "1"))
+    d = int(config.get("day", "1"))
+    h = int(config.get("hour", "0"))
+    return ((m * 31 + d) * 24 + h) % 100
 
 def build_life_overlay(config):
-    """Build character/activity overlay based on deterministic seed from power values."""
+    """Build character/activity overlay based on deterministic seed + weather context."""
     seed = _activity_seed(config)
+    is_night = config.get("is_night", "false") == "true"
+    weather = config.get("weather_icon", "clear-day")
     children = []
-    if seed < 20:
+
+    # Weather-specific scenes take priority
+    if is_night and weather in ("rain", "sleet") and seed < 50:
+        children = _scene_pond_fishing()
+    elif weather == "snow" and 40 <= seed and seed < 55:
+        children = _scene_snowball()
+    elif is_night and "clear" in weather and 85 <= seed and seed < 90:
+        children = _scene_fireworks()
+    # Standard scenes
+    elif seed < 20:
         children = _scene_leaving_home()
     elif seed < 40:
         children = _scene_coming_home()
