@@ -233,6 +233,7 @@ GAME_STATE_FILE = SCRIPT_DIR / "game_state.json"
 GAME_X_MIN = 0         # Left edge
 GAME_X_MAX = 19        # Right edge (col1 boundary)
 HOME_X = 10            # "Home" position in the game area (center of col1)
+TICKS_PER_PUSH = 4     # Run multiple ticks per push cycle for visible progress
 POND_X = 4             # Fishing pond x-position
 POND_Y = 25            # Fishing pond y-position
 POWER_ZERO_W = 50      # Below this, solar panel text not shown
@@ -254,9 +255,9 @@ CROP_STAGE_TICKS = [10, 15, 20]  # seed->sprout, sprout->grown, grown->harvestab
 
 # Character templates for initial state
 CHAR_TEMPLATES = [
-    {"id": "parent1", "shirt": "#4488cc", "max_hp": 10, "trait": "brave", "home_offset": -3},
+    {"id": "parent1", "shirt": "#4488cc", "max_hp": 10, "trait": "brave", "home_offset": -5},
     {"id": "parent2", "shirt": "#cc4444", "max_hp": 10, "trait": "cautious", "home_offset": 0},
-    {"id": "kid", "shirt": "#44cc44", "max_hp": 6, "trait": "fast", "home_offset": 3},
+    {"id": "kid", "shirt": "#44cc44", "max_hp": 6, "trait": "fast", "home_offset": 5},
 ]
 PET_TEMPLATES = [
     {"id": "dog"},
@@ -324,7 +325,7 @@ class GameEngine:
 
     # --- Main tick ---
 
-    def tick(self, sensor_data, weather_data):
+    def tick(self, sensor_data, weather_data, save=True):
         """Run one game tick. Returns dict of pixlet render params."""
         is_night = weather_data.get("is_night", "false") == "true"
         battery_pct = int(sensor_data.get("battery_pct", "0"))
@@ -367,6 +368,7 @@ class GameEngine:
         # Phase 7: Movement
         self._move_characters()
         self._move_pets()
+        self._nudge_apart()
 
         # Phase 8: Revival
         self._check_revivals(battery_pct)
@@ -378,7 +380,8 @@ class GameEngine:
         self._update_prosperity(battery_pct, solar_power)
 
         self.state["tick"] += 1
-        self._save()
+        if save:
+            self._save()
         return self._build_render_params()
 
     # --- Phase 1: Crops ---
@@ -429,7 +432,7 @@ class GameEngine:
 
     def _decay_food(self):
         """Food decreases over time (characters eating)."""
-        if self.state["tick"] % 10 == 0 and self.state["world"]["food"] > 0:
+        if self.state["tick"] % 40 == 0 and self.state["world"]["food"] > 0:
             self.state["world"]["food"] = max(0, self.state["world"]["food"] - 1)
 
     # --- Phase 2: Threats ---
@@ -442,7 +445,7 @@ class GameEngine:
             self.state["world"]["threat_cooldown"] -= 1
             return
 
-        base_chance = 15 if is_night else 3
+        base_chance = 25 if is_night else 10
         if battery_pct < 30:
             base_chance *= 2
         if grid_status.lower() != "on":
@@ -461,7 +464,7 @@ class GameEngine:
                 # Raider from the right edge
                 threat = {"type": "raider", "x": GAME_X_MAX, "hp": 3, "state": "approaching", "speed": 1, "damage": 1, "dir": -1}
             self.state["threats"].append(threat)
-            self.state["world"]["threat_cooldown"] = 8
+            self.state["world"]["threat_cooldown"] = 3
             self.state["world"]["last_event"] = f"{threat['type']}_spawn"
             logger.info("Game: %s spawned at x=%d", threat["type"], threat["x"])
 
@@ -471,9 +474,9 @@ class GameEngine:
             if threat["state"] == "approaching":
                 direction = threat.get("dir", -1)
                 if direction > 0:
-                    threat["x"] = min(HOME_X + 3, threat["x"] + threat["speed"])
+                    threat["x"] = min(HOME_X, threat["x"] + threat["speed"])
                 else:
-                    threat["x"] = max(HOME_X - 3, threat["x"] - threat["speed"])
+                    threat["x"] = max(HOME_X, threat["x"] - threat["speed"])
                 # Clamp to game area
                 threat["x"] = max(GAME_X_MIN, min(GAME_X_MAX, threat["x"]))
 
@@ -559,7 +562,7 @@ class GameEngine:
             return
 
         # 5. PLANT — random spot in crop zone, night, have food
-        if is_night and self.state["world"]["food"] > 20 and threat_dist > 8:
+        if self.state["world"]["food"] > 20 and threat_dist > 8:
             num_crops = len(self.state["world"]["crops"])
             if num_crops < MAX_CROPS:
                 spot = self._find_crop_spot()
@@ -664,22 +667,8 @@ class GameEngine:
 
     # --- Phase 5: Movement ---
 
-    def _get_occupied_positions(self, exclude_id):
-        """Return set of x positions occupied by other alive characters and deployed pets."""
-        occupied = set()
-        MIN_SPACING = 2  # entities need at least 2px gap
-        for c in self.state["characters"]:
-            if c["alive"] and c["id"] != exclude_id:
-                for dx in range(-MIN_SPACING + 1, MIN_SPACING):
-                    occupied.add(c["x"] + dx)
-        for p in self.state["pets"]:
-            if p.get("deployed", False):
-                for dx in range(-MIN_SPACING + 1, MIN_SPACING):
-                    occupied.add(p["x"] + dx)
-        return occupied
-
     def _move_characters(self):
-        """Move characters toward their target_x, avoiding overlap with others."""
+        """Move characters toward their target_x with direct movement (no blocking)."""
         for char in self.state["characters"]:
             if not char["alive"] or char["state"] == "idle" or char["state"] == "fishing":
                 continue
@@ -694,23 +683,13 @@ class GameEngine:
             elif char["trait"] == "fast":
                 speed = 2
             elif hp_ratio < 0.33:
-                speed = 1  # limping, already at 1
+                speed = 1  # limping
             else:
                 speed = 2 if hp_ratio > 0.75 else 1
 
-            occupied = self._get_occupied_positions(char["id"])
-
-            # Try full speed first, then step down to 1, then 0 (blocked)
-            moved = False
             direction = 1 if target > char["x"] else -1
-            for step in range(speed, 0, -1):
-                new_x = char["x"] + step * direction
-                new_x = max(GAME_X_MIN, min(GAME_X_MAX, new_x))
-                if new_x not in occupied:
-                    char["x"] = new_x
-                    moved = True
-                    break
-            # If completely blocked, stay put (don't clip through)
+            new_x = char["x"] + speed * direction
+            char["x"] = max(GAME_X_MIN, min(GAME_X_MAX, new_x))
 
     def _deploy_pets(self):
         """Only one pet can be deployed at a time. Choose based on threats."""
@@ -788,17 +767,10 @@ class GameEngine:
                             logger.info("Game: Cat scratched alien! HP=%d", threat["hp"])
 
     def _move_pets(self):
-        """Move deployed pet to follow nearest alive character, avoiding overlap."""
+        """Move deployed pet to follow nearest alive character."""
         alive_chars = [c for c in self.state["characters"] if c["alive"]]
         if not alive_chars:
             return
-        # Collect positions of all characters and other pets
-        char_positions = set()
-        MIN_SPACING = 2
-        for c in self.state["characters"]:
-            if c["alive"]:
-                for dx in range(-MIN_SPACING + 1, MIN_SPACING):
-                    char_positions.add(c["x"] + dx)
 
         for pet in self.state["pets"]:
             if not pet.get("deployed", False):
@@ -808,22 +780,33 @@ class GameEngine:
             offset = 2 if pet["id"] == "dog" else -2
             target = nearest["x"] + offset
 
-            # Collect positions of other deployed pets
-            occupied = set(char_positions)
-            for other_pet in self.state["pets"]:
-                if other_pet["id"] != pet["id"] and other_pet.get("deployed", False):
-                    for dx in range(-MIN_SPACING + 1, MIN_SPACING):
-                        occupied.add(other_pet["x"] + dx)
-
             if abs(pet["x"] - target) > 1:
                 direction = 1 if target > pet["x"] else -1
-                for step in (2, 1):
-                    new_x = pet["x"] + step * direction
-                    new_x = max(GAME_X_MIN, min(GAME_X_MAX, new_x))
-                    if new_x not in occupied:
-                        pet["x"] = new_x
-                        break
+                new_x = pet["x"] + 2 * direction
+                pet["x"] = max(GAME_X_MIN, min(GAME_X_MAX, new_x))
             pet["x"] = max(GAME_X_MIN, min(GAME_X_MAX, pet["x"]))
+
+    def _nudge_apart(self):
+        """Post-movement: gently separate overlapping entities to prevent visual overlap."""
+        entities = []
+        for c in self.state["characters"]:
+            if c["alive"]:
+                entities.append(c)
+        for p in self.state["pets"]:
+            if p.get("deployed", False):
+                entities.append(p)
+        entities.sort(key=lambda e: e["x"])
+        for i in range(len(entities) - 1):
+            a = entities[i]
+            b = entities[i + 1]
+            if a["x"] == b["x"]:
+                # Only nudge idle/patrol entities to avoid disrupting combat/farming
+                a_nudgeable = a.get("state", "idle") in ("idle", "patrol", "returning")
+                b_nudgeable = b.get("state", "idle") in ("idle", "patrol", "returning")
+                if a_nudgeable and a["x"] > GAME_X_MIN:
+                    a["x"] -= 1
+                elif b_nudgeable and b["x"] < GAME_X_MAX:
+                    b["x"] += 1
 
     # --- Phase 6: Revival ---
 
@@ -873,7 +856,7 @@ class GameEngine:
         """Characters take damage when food is 0."""
         if self.state["world"]["food"] > 0:
             return
-        if self.state["tick"] % 5 == 0:
+        if self.state["tick"] % 20 == 0:
             for char in self.state["characters"]:
                 if char["alive"]:
                     char["hp"] -= 1
@@ -1036,9 +1019,10 @@ def run_once(config):
 
     session.close()
 
-    # Run game engine tick
+    # Run game engine ticks (multiple per push for visible progress)
     engine = _get_game_engine()
-    game_params = engine.tick(sensor_data, weather_data)
+    for i in range(TICKS_PER_PUSH):
+        game_params = engine.tick(sensor_data, weather_data, save=(i == TICKS_PER_PUSH - 1))
 
     # Render via Pixlet
     webp_path = render_pixlet(sensor_data, weather_data, config, game_params)
@@ -1125,9 +1109,10 @@ def _do_render_push(cache, config):
     sensor_data, weather_data = _cache_to_render_data(cache, config)
     logger.info("WS render: sensors=%s weather=%s", sensor_data, weather_data)
 
-    # Run game engine tick
+    # Run game engine ticks (multiple per push for visible progress)
     engine = _get_game_engine()
-    game_params = engine.tick(sensor_data, weather_data)
+    for i in range(TICKS_PER_PUSH):
+        game_params = engine.tick(sensor_data, weather_data, save=(i == TICKS_PER_PUSH - 1))
 
     webp_path = render_pixlet(sensor_data, weather_data, config, game_params)
     if webp_path is None:
