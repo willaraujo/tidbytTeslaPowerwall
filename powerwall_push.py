@@ -237,16 +237,16 @@ POND_X = 4             # Fishing pond x-position
 POND_Y = 25            # Fishing pond y-position
 POWER_ZERO_W = 50      # Below this, solar panel text not shown
 
-# Crop slots: (x, y) positions in the bottom half of the display
-# Spread across col1 (x=0-19). Further from HOME_X = better yield.
-CROP_SLOTS = [
-    (2, 24),   # far left — best yield (distance 28 from house)
-    (6, 22),   # left
-    (10, 26),  # mid-left
-    (14, 24),  # mid col1
-    (17, 22),  # right edge of col1 — lowest yield (distance 13)
-]
-MAX_CROPS = len(CROP_SLOTS)
+# Crop planting zone: col1 only (x=0-19), bottom area (y=19-28).
+# No-go: col2 (x=20-43) and col3 (x=44-63) are info displays.
+# No-go: y<19 overlaps character walk line; y>28 overlaps pond area.
+# Minimum 3px spacing between crops so they don't cluster.
+CROP_X_MIN = 0
+CROP_X_MAX = 19
+CROP_Y_MIN = 19
+CROP_Y_MAX = 28
+CROP_MIN_SPACING = 3      # minimum pixels between any two crops
+MAX_CROPS = 8             # max simultaneous crops across the map
 MAX_FOOD = 100
 
 # Crop growth ticks per stage (base values, modified by growth_rate)
@@ -405,6 +405,28 @@ class GameEngine:
                     crop["stage"] -= 1
                     crop["stage_tick"] = self.state["tick"]
 
+    def _find_crop_spot(self):
+        """Pick a random (x, y) in the crop zone that doesn't cluster with existing crops.
+        Returns (x, y) or None if no valid spot found after several attempts."""
+        existing = [(c["x"], c["y"]) for c in self.state["world"]["crops"]]
+        # Also avoid spots other characters are walking to for planting
+        busy_xs = {c["target_x"] for c in self.state["characters"]
+                   if c["alive"] and c["state"] == "farming"}
+        for _ in range(20):  # 20 random attempts
+            x = random.randint(CROP_X_MIN, CROP_X_MAX)
+            y = random.randint(CROP_Y_MIN, CROP_Y_MAX)
+            if x in busy_xs:
+                continue
+            # Enforce minimum spacing from all existing crops
+            too_close = False
+            for ex, ey in existing:
+                if abs(x - ex) < CROP_MIN_SPACING and abs(y - ey) < CROP_MIN_SPACING:
+                    too_close = True
+                    break
+            if not too_close:
+                return (x, y)
+        return None
+
     def _decay_food(self):
         """Food decreases over time (characters eating)."""
         if self.state["tick"] % 10 == 0 and self.state["world"]["food"] > 0:
@@ -536,31 +558,28 @@ class GameEngine:
                 char["target_x"] = crop["x"]
             return
 
-        # 5. PLANT — empty slot, night, have food
+        # 5. PLANT — random spot in crop zone, night, have food
         if is_night and self.state["world"]["food"] > 20 and threat_dist > 8:
-            used_xs = {c["x"] for c in self.state["world"]["crops"]}
-            busy_plant = {c["target_x"] for c in self.state["characters"]
-                          if c["alive"] and c["id"] != char["id"] and c["state"] == "farming"}
-            empty_slots = [s for s in CROP_SLOTS if s[0] not in used_xs and s[0] not in busy_plant]
-            if empty_slots:
-                # Round-robin slot assignment so crops spread across col1
-                slot_idx = self.state["tick"] % len(empty_slots)
-                slot_x, slot_y = empty_slots[slot_idx]
-                if abs(char["x"] - slot_x) <= 2:
-                    # At slot — plant, then return home
-                    self.state["world"]["crops"].append({
-                        "x": slot_x, "y": slot_y, "stage": 0,
-                        "planted_tick": self.state["tick"],
-                        "stage_tick": self.state["tick"],
-                        "growth_rate": round(random.uniform(0.7, 1.3), 2),
-                    })
-                    char["state"] = "returning"
-                    char["target_x"] = my_home
-                    logger.info("Game: %s planted crop at x=%d,y=%d (returning home)", char["id"], slot_x, slot_y)
-                else:
-                    char["state"] = "farming"
-                    char["target_x"] = slot_x
-                return
+            num_crops = len(self.state["world"]["crops"])
+            if num_crops < MAX_CROPS:
+                spot = self._find_crop_spot()
+                if spot:
+                    slot_x, slot_y = spot
+                    if abs(char["x"] - slot_x) <= 2:
+                        # At spot — plant, then return home
+                        self.state["world"]["crops"].append({
+                            "x": slot_x, "y": slot_y, "stage": 0,
+                            "planted_tick": self.state["tick"],
+                            "stage_tick": self.state["tick"],
+                            "growth_rate": round(random.uniform(0.7, 1.3), 2),
+                        })
+                        char["state"] = "returning"
+                        char["target_x"] = my_home
+                        logger.info("Game: %s planted crop at x=%d,y=%d (returning home)", char["id"], slot_x, slot_y)
+                    else:
+                        char["state"] = "farming"
+                        char["target_x"] = slot_x
+                    return
 
         # 6. FISH — low food, no harvestable crops, pond must be active
         if self.state["world"]["food"] < 30 and not harvestable and self.state["world"].get("pond_active", False):
