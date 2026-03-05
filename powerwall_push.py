@@ -228,12 +228,25 @@ def fetch_weather_pirate(config):
 GAME_STATE_FILE = SCRIPT_DIR / "game_state.json"
 
 # Pixel zones on the 64x32 display
-ZONE_CROPS = (2, 18)   # Col1: crop fields
-ZONE_HOME = (20, 43)   # Col2: safe zone (house)
+# Bottom half (y=17-31) is the game area; text/numbers are obstacles
+ZONE_CROPS = (0, 19)   # Col1: crop fields (open at night)
+ZONE_HOME = (20, 43)   # Col2: safe zone (house area)
 ZONE_WILD = (44, 63)   # Col3: wilderness
 HOME_X = 30            # House door x-position
-POND_X = 8             # Fishing pond position
-CROP_SLOTS = [4, 8, 12, 16]  # Fixed crop x-positions
+POND_X = 4             # Fishing pond x-position
+POND_Y = 25            # Fishing pond y-position
+POWER_ZERO_W = 50      # Below this, solar panel text not shown
+
+# Crop slots: (x, y) positions in the bottom half of the display
+# Spread across col1 (x=0-19). Further from HOME_X = better yield.
+CROP_SLOTS = [
+    (2, 24),   # far left — best yield (distance 28 from house)
+    (6, 22),   # left
+    (10, 26),  # mid-left
+    (14, 24),  # mid col1
+    (17, 22),  # right edge of col1 — lowest yield (distance 13)
+]
+MAX_CROPS = len(CROP_SLOTS)
 MAX_FOOD = 100
 
 # Crop growth ticks per stage (base values, modified by growth_rate)
@@ -287,6 +300,7 @@ class GameEngine:
             "world": {
                 "food": 50, "prosperity": 50,
                 "crops": [], "threat_cooldown": 0, "last_event": "",
+                "pond_active": False,
             },
             "characters": chars,
             "pets": pets,
@@ -315,6 +329,11 @@ class GameEngine:
         if self.state["was_night"] and not is_night:
             self.state["day_number"] += 1
         self.state["was_night"] = is_night
+
+        # Pond: forms during rain, but NOT when solar panel text occupies col1
+        show_panel = (not is_night) and solar_power > POWER_ZERO_W
+        is_raining = weather_icon in ("rain", "sleet", "thunderstorm")
+        self.state["world"]["pond_active"] = is_raining and not show_panel
 
         # Phase 1: Environment
         self._grow_crops(is_night, battery_pct)
@@ -397,22 +416,31 @@ class GameEngine:
         if random.randint(1, 100) <= base_chance:
             # Pick threat type
             roll = random.randint(1, 100)
-            if roll <= 50:
-                threat = {"type": "yeti", "x": 62, "hp": 4, "state": "approaching", "speed": 2, "damage": 2}
-            elif roll <= 80:
-                threat = {"type": "raider", "x": 62, "hp": 3, "state": "approaching", "speed": 2, "damage": 1}
+            if roll <= 40:
+                # Yeti from the right (wilderness)
+                threat = {"type": "yeti", "x": 62, "hp": 4, "state": "approaching", "speed": 2, "damage": 2, "dir": -1}
+            elif roll <= 70:
+                # Alien (little green man) from the left (crop fields)
+                threat = {"type": "alien", "x": 0, "hp": 2, "state": "approaching", "speed": 2, "damage": 1, "dir": 1}
             else:
-                threat = {"type": "ufo", "x": 62, "hp": 2, "state": "approaching", "speed": 3, "damage": 1}
+                # Raider from the right
+                threat = {"type": "raider", "x": 62, "hp": 3, "state": "approaching", "speed": 2, "damage": 1, "dir": -1}
             self.state["threats"].append(threat)
             self.state["world"]["threat_cooldown"] = 8
             self.state["world"]["last_event"] = f"{threat['type']}_spawn"
             logger.info("Game: %s spawned at x=%d", threat["type"], threat["x"])
 
     def _move_threats(self):
-        """Move threats toward house."""
+        """Move threats toward house. dir=1 from left, dir=-1 from right."""
         for threat in self.state["threats"]:
             if threat["state"] == "approaching":
-                threat["x"] = max(HOME_X - 5, threat["x"] - threat["speed"])
+                direction = threat.get("dir", -1)
+                if direction > 0:
+                    # From left, moving right toward house
+                    threat["x"] = min(HOME_X + 5, threat["x"] + threat["speed"])
+                else:
+                    # From right, moving left toward house
+                    threat["x"] = max(HOME_X - 5, threat["x"] - threat["speed"])
 
     # --- Phase 3: Character AI ---
 
@@ -453,14 +481,19 @@ class GameEngine:
         if harvestable and is_night and self.state["world"]["food"] < 50:
             crop = harvestable[0]
             if abs(char["x"] - crop["x"]) <= 2:
-                # At crop — harvest it
+                # At crop — harvest. Further from house = better yield.
+                distance = abs(crop["x"] - HOME_X)
+                base_yield = 15 + random.randint(0, 10)
+                distance_bonus = int(distance * 0.5)
                 bonus = 5 if char["trait"] == "cautious" else 0
-                self.state["world"]["food"] = min(MAX_FOOD, self.state["world"]["food"] + 15 + random.randint(0, 10) + bonus)
+                total = base_yield + distance_bonus + bonus
+                self.state["world"]["food"] = min(MAX_FOOD, self.state["world"]["food"] + total)
                 self.state["world"]["crops"].remove(crop)
                 char["state"] = "idle"
                 char["target_x"] = HOME_X
                 self.state["world"]["last_event"] = "harvest"
-                logger.info("Game: %s harvested crop, food=%d", char["id"], self.state["world"]["food"])
+                logger.info("Game: %s harvested crop at x=%d, yield=%d, food=%d",
+                            char["id"], crop["x"], total, self.state["world"]["food"])
             else:
                 char["state"] = "farming"
                 char["target_x"] = crop["x"]
@@ -468,28 +501,28 @@ class GameEngine:
 
         # 5. PLANT — empty slot, night, have food
         if is_night and self.state["world"]["food"] > 20 and threat_dist > 15:
-            used_slots = {c["x"] for c in self.state["world"]["crops"]}
-            empty_slots = [s for s in CROP_SLOTS if s not in used_slots]
+            used_xs = {c["x"] for c in self.state["world"]["crops"]}
+            empty_slots = [s for s in CROP_SLOTS if s[0] not in used_xs]
             if empty_slots:
-                slot = empty_slots[0]
-                if abs(char["x"] - slot) <= 2:
+                slot_x, slot_y = empty_slots[0]
+                if abs(char["x"] - slot_x) <= 2:
                     # At slot — plant
                     self.state["world"]["crops"].append({
-                        "x": slot, "stage": 0, "planted_tick": self.state["tick"],
+                        "x": slot_x, "y": slot_y, "stage": 0,
+                        "planted_tick": self.state["tick"],
                         "stage_tick": self.state["tick"],
                         "growth_rate": round(random.uniform(0.7, 1.3), 2),
                     })
                     char["state"] = "idle"
                     char["target_x"] = HOME_X
-                    logger.info("Game: %s planted crop at x=%d", char["id"], slot)
+                    logger.info("Game: %s planted crop at x=%d,y=%d", char["id"], slot_x, slot_y)
                 else:
                     char["state"] = "farming"
-                    char["target_x"] = slot
+                    char["target_x"] = slot_x
                 return
 
-        # 6. FISH — low food, no harvestable crops, night or raining
-        is_raining = weather_icon in ("rain", "sleet", "thunderstorm")
-        if self.state["world"]["food"] < 30 and not harvestable and (is_night or is_raining):
+        # 6. FISH — low food, no harvestable crops, pond must be active (rainstorm + col1 free)
+        if self.state["world"]["food"] < 30 and not harvestable and self.state["world"].get("pond_active", False):
             if abs(char["x"] - POND_X) <= 2:
                 # At pond — fish
                 char["state"] = "fishing"
@@ -706,13 +739,16 @@ class GameEngine:
         pets = [f"{p['id']}:{p['x']}:{1 if p['alive'] else 0}" for p in self.state["pets"]]
         params["gp"] = "|".join(pets)
 
-        # Threats: "type:x:state"
-        threats = [f"{t['type']}:{t['x']}:{t['state']}" for t in self.state["threats"]]
+        # Threats: "type:x:state:dir"
+        threats = [f"{t['type']}:{t['x']}:{t['state']}:{t.get('dir', -1)}" for t in self.state["threats"]]
         params["gt"] = "|".join(threats) if threats else ""
 
-        # Crops: "x:stage"
-        crops = [f"{cr['x']}:{cr['stage']}" for cr in self.state["world"]["crops"]]
+        # Crops: "x:y:stage"
+        crops = [f"{cr['x']}:{cr.get('y', 24)}:{cr['stage']}" for cr in self.state["world"]["crops"]]
         params["gcr"] = "|".join(crops) if crops else ""
+
+        # Pond active flag
+        params["gpond"] = "true" if self.state["world"].get("pond_active", False) else "false"
 
         params["gactive"] = "true"
         return params
