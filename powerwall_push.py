@@ -242,6 +242,7 @@ def render_pixlet(sensor_data, weather_data, config=None):
         f"sun_elevation={weather_data.get('sun_elevation', '0')}",
         f"month={now.month}",
         f"day={now.day}",
+        f"hour={now.hour}",
         f"seasonal={seasonal}",
     ]
 
