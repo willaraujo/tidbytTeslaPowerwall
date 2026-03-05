@@ -1528,14 +1528,41 @@ def build_life_overlay(config):
     return render.Box(width = 64, height = 32, child = render.Stack(children = children))
 
 # --- Game overlay: persistent survival simulation rendering ---
+# All game entities render in the BOTTOM HALF (y=17-31) of the 64x32 display.
+# Text/numbers in col2/col3 are treated as obstacles. Col1 is the main game area at night.
 
 # Speed → animation duration mapping (behavioral cues, no stats shown)
 GAME_SPEED_DUR = {"slow": 140, "mid": 80, "fast": 50}
 GAME_SHIRTS = {"parent1": "#4488cc", "parent2": "#cc4444", "kid": "#44cc44"}
 
+# Game area y-coordinates (bottom half of display)
+GAME_WALK_Y = 17       # Character walking level (just below icons, above text obstacles)
+GAME_FARM_Y = 20       # Character farming level (in col1 open area)
+GAME_FISH_Y = 23       # Fishing position (at pond edge)
+
+# Flower color: bright magenta — distinct from all other colors in the palette
+FLOWER_COLOR = "#FF44FF"
+FLOWER_STEM = "#22AA22"
+
+# Pond rendering position (col1 bottom-left, forms during rain)
+POND_RENDER_X = 3
+POND_RENDER_Y = 24
+
 def _build_game_overlay(config):
-    """Parse game state params and render characters, threats, crops with behavioral animations."""
+    """Parse game state params and render characters, threats, crops, pond in the bottom half."""
     children = []
+
+    # Pond: render water area when active (rainstorm + col1 not occupied by solar text)
+    if config.get("gpond", "false") == "true":
+        children.extend(_render_pond())
+
+    # Crops: "x:y:stage"
+    gcr = config.get("gcr", "")
+    if gcr:
+        for entry in gcr.split("|"):
+            parts = entry.split(":")
+            if len(parts) >= 3:
+                children.extend(_render_crop(parts))
 
     # Characters: "id:x:target_x:state:alive:speed"
     gc = config.get("gc", "")
@@ -1553,7 +1580,7 @@ def _build_game_overlay(config):
             if len(parts) >= 3:
                 children.extend(_render_game_pet(parts))
 
-    # Threats: "type:x:state"
+    # Threats: "type:x:state:dir"
     gt = config.get("gt", "")
     if gt:
         for entry in gt.split("|"):
@@ -1561,20 +1588,12 @@ def _build_game_overlay(config):
             if len(parts) >= 3:
                 children.extend(_render_game_threat(parts))
 
-    # Crops: "x:stage"
-    gcr = config.get("gcr", "")
-    if gcr:
-        for entry in gcr.split("|"):
-            parts = entry.split(":")
-            if len(parts) >= 2:
-                children.extend(_render_crop(parts))
-
     if not children:
         return None
     return render.Box(width = 64, height = 32, child = render.Stack(children = children))
 
 def _render_game_char(parts):
-    """Render one game character based on state — behavior only, no stats."""
+    """Render one game character in the bottom half — behavior only, no stats."""
     char_id = parts[0]
     x = int(parts[1])
     target_x = int(parts[2])
@@ -1586,18 +1605,18 @@ def _render_game_char(parts):
     children = []
 
     if not alive:
-        # Gravestone cross at home area (each character offset slightly)
-        gx = 28 if char_id == "parent1" else (30 if char_id == "parent2" else 32)
-        children.append(render.Padding(pad = (gx, 12, 0, 0), child = render.Box(width = 1, height = 3, color = "#666666")))
-        children.append(render.Padding(pad = (gx - 1, 13, 0, 0), child = render.Box(width = 3, height = 1, color = "#666666")))
+        # Gravestone cross in the bottom area near house
+        gx = 26 if char_id == "parent1" else (30 if char_id == "parent2" else 34)
+        children.append(render.Padding(pad = (gx, GAME_WALK_Y, 0, 0), child = render.Box(width = 1, height = 3, color = "#666666")))
+        children.append(render.Padding(pad = (gx - 1, GAME_WALK_Y + 1, 0, 0), child = render.Box(width = 3, height = 1, color = "#666666")))
         return children
 
     dur = GAME_SPEED_DUR.get(speed, 80)
 
     if state == "fighting":
-        # Rapid jitter — character vibrates at threat position
+        # Rapid jitter at threat position in the bottom half
         children.append(animation.Transformation(
-            child = _pixel_person(0, 11, shirt),
+            child = _pixel_person(0, GAME_WALK_Y, shirt),
             duration = 8,
             delay = 0,
             direction = "alternate",
@@ -1608,9 +1627,9 @@ def _render_game_char(parts):
             ],
         ))
     elif state == "farming":
-        # Bobbing up/down at crop position (tending crops)
+        # Bobbing at crop position — deeper in the game area
         children.append(animation.Transformation(
-            child = _pixel_person(0, 11, shirt),
+            child = _pixel_person(0, GAME_FARM_Y, shirt),
             duration = 20,
             delay = 0,
             direction = "alternate",
@@ -1622,13 +1641,14 @@ def _render_game_char(parts):
         ))
     elif state == "fishing":
         # Sitting at pond edge with twitching fishing rod
-        children.append(render.Padding(pad = (x, 10, 0, 0), child = render.Box(width = 1, height = 1, color = CHAR_SKIN)))
-        children.append(render.Padding(pad = (x - 1, 11, 0, 0), child = render.Box(width = 3, height = 1, color = shirt)))
-        children.append(render.Padding(pad = (x - 1, 12, 0, 0), child = render.Box(width = 2, height = 1, color = CHAR_PANTS)))
+        fy = GAME_FISH_Y
+        children.append(render.Padding(pad = (x, fy, 0, 0), child = render.Box(width = 1, height = 1, color = CHAR_SKIN)))
+        children.append(render.Padding(pad = (x - 1, fy + 1, 0, 0), child = render.Box(width = 3, height = 1, color = shirt)))
+        children.append(render.Padding(pad = (x - 1, fy + 2, 0, 0), child = render.Box(width = 2, height = 1, color = CHAR_PANTS)))
         # Rod with twitch
-        children.append(render.Padding(pad = (x + 2, 9, 0, 0), child = render.Box(width = 1, height = 1, color = "#885533")))
+        children.append(render.Padding(pad = (x + 2, fy - 1, 0, 0), child = render.Box(width = 1, height = 1, color = "#885533")))
         children.append(animation.Transformation(
-            child = render.Padding(pad = (x + 2, 10, 0, 0), child = render.Box(width = 1, height = 4, color = "#885533")),
+            child = render.Padding(pad = (x + 2, fy, 0, 0), child = render.Box(width = 1, height = 3, color = "#885533")),
             duration = 30,
             delay = 0,
             direction = "alternate",
@@ -1640,105 +1660,134 @@ def _render_game_char(parts):
         ))
     elif state == "fleeing":
         # Double-speed dash toward home
-        children.append(_walking_person(shirt, x, target_x, 11, 40))
+        children.append(_walking_person(shirt, x, target_x, GAME_WALK_Y, 40))
     elif x != target_x:
         # Walking to target at speed determined by HP (hidden)
-        children.append(_walking_person(shirt, x, target_x, 11, dur))
+        children.append(_walking_person(shirt, x, target_x, GAME_WALK_Y, dur))
     else:
         # Static/idle at position
-        children.append(_pixel_person(x, 11, shirt))
+        children.append(_pixel_person(x, GAME_WALK_Y, shirt))
 
     return children
 
 def _render_game_pet(parts):
-    """Render game pet (dog/cat) at position."""
+    """Render game pet (dog/cat) in the bottom half."""
     pet_id = parts[0]
     x = int(parts[1])
     alive = parts[2] == "1"
     if not alive:
         return []
     if pet_id == "dog":
-        return [_pixel_dog(x, 12)]
+        return [_pixel_dog(x, GAME_WALK_Y + 1)]
     elif pet_id == "cat":
-        return [_pixel_cat(x, 13)]
+        return [_pixel_cat(x, GAME_WALK_Y + 2)]
     return []
 
+def _pixel_alien(x, y):
+    """2x3 little green man sprite at position (x, y)."""
+    return render.Stack(children = [
+        # Head: bright green
+        render.Padding(pad = (x, y, 0, 0), child = render.Box(width = 2, height = 1, color = "#44ff44")),
+        # Body: darker green
+        render.Padding(pad = (x, y + 1, 0, 0), child = render.Box(width = 2, height = 1, color = "#22cc22")),
+        # Legs
+        render.Padding(pad = (x, y + 2, 0, 0), child = render.Box(width = 1, height = 1, color = "#22cc22")),
+        render.Padding(pad = (x + 1, y + 2, 0, 0), child = render.Box(width = 1, height = 1, color = "#22cc22")),
+    ])
+
 def _render_game_threat(parts):
-    """Render approaching threat with menacing animation."""
+    """Render approaching threat in the bottom half with menacing animation."""
     threat_type = parts[0]
     x = int(parts[1])
+    direction = int(parts[3]) if len(parts) >= 4 else -1
     children = []
 
+    # Shake direction: threats shake toward the house
+    shake_dx = -1 if direction < 0 else 1
+
     if threat_type == "yeti":
-        # Yeti stomps toward house with slight shake
+        # Yeti stomps from the right
         children.append(animation.Transformation(
-            child = _pixel_yeti(0, 10),
+            child = _pixel_yeti(0, GAME_WALK_Y - 1),
             duration = 15,
             delay = 0,
             direction = "alternate",
             fill_mode = "forwards",
             keyframes = [
                 animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(x, 0)]),
-                animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(x - 1, 0)]),
+                animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(x + shake_dx, 0)]),
             ],
         ))
-    elif threat_type == "ufo":
-        # UFO hovering at sky level
+    elif threat_type == "alien":
+        # Little green man from the left — sneaky approach
         children.append(animation.Transformation(
-            child = _pixel_ufo(0, 2),
-            duration = 20,
-            delay = 0,
-            direction = "alternate",
-            fill_mode = "forwards",
-            keyframes = [
-                animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(x, 0)]),
-                animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(x, -1)]),
-            ],
-        ))
-    elif threat_type == "raider":
-        # Raider: red-shirted person walking menacingly
-        children.append(animation.Transformation(
-            child = _pixel_person(0, 11, "#ff0000"),
+            child = _pixel_alien(0, GAME_WALK_Y),
             duration = 12,
             delay = 0,
             direction = "alternate",
             fill_mode = "forwards",
             keyframes = [
                 animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(x, 0)]),
-                animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(x - 1, 0)]),
+                animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(x + shake_dx, 0)]),
+            ],
+        ))
+    elif threat_type == "raider":
+        # Raider: red-shirted person from the right
+        children.append(animation.Transformation(
+            child = _pixel_person(0, GAME_WALK_Y, "#ff0000"),
+            duration = 12,
+            delay = 0,
+            direction = "alternate",
+            fill_mode = "forwards",
+            keyframes = [
+                animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(x, 0)]),
+                animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(x + shake_dx, 0)]),
             ],
         ))
 
     return children
 
+def _render_pond():
+    """Render a small blue pond in the col1 bottom-left area."""
+    px = POND_RENDER_X
+    py = POND_RENDER_Y
+    return [
+        # Small irregular pond shape: ~5x3 pixels of water
+        render.Padding(pad = (px + 1, py, 0, 0), child = render.Box(width = 3, height = 1, color = "#224488")),
+        render.Padding(pad = (px, py + 1, 0, 0), child = render.Box(width = 5, height = 1, color = "#2255AA")),
+        render.Padding(pad = (px + 1, py + 2, 0, 0), child = render.Box(width = 3, height = 1, color = "#224488")),
+    ]
+
 def _render_crop(parts):
-    """Render crop at growth stage 0-3."""
+    """Render crop as a small pink/magenta flower at (x, y) — distinct color not used elsewhere."""
     x = int(parts[0])
-    stage = int(parts[1])
+    y = int(parts[1])
+    stage = int(parts[2])
     children = []
 
     if stage == 0:
-        # Seed: tiny brown dot
-        children.append(render.Padding(pad = (x, 14, 0, 0), child = render.Box(width = 1, height = 1, color = "#885533")))
+        # Seed: tiny purple dot
+        children.append(render.Padding(pad = (x, y + 1, 0, 0), child = render.Box(width = 1, height = 1, color = "#884488")))
     elif stage == 1:
-        # Sprout: small green shoot
-        children.append(render.Padding(pad = (x, 13, 0, 0), child = render.Box(width = 1, height = 2, color = "#228822")))
+        # Sprout: green stem with tiny pink bud
+        children.append(render.Padding(pad = (x, y + 1, 0, 0), child = render.Box(width = 1, height = 1, color = FLOWER_STEM)))
+        children.append(render.Padding(pad = (x, y, 0, 0), child = render.Box(width = 1, height = 1, color = "#CC44CC")))
     elif stage == 2:
-        # Grown: taller green with yellow tip
-        children.append(render.Padding(pad = (x, 12, 0, 0), child = render.Box(width = 1, height = 3, color = "#228822")))
-        children.append(render.Padding(pad = (x, 12, 0, 0), child = render.Box(width = 1, height = 1, color = "#ddaa00")))
+        # Grown: green stem with larger pink flower
+        children.append(render.Padding(pad = (x, y + 1, 0, 0), child = render.Box(width = 1, height = 1, color = FLOWER_STEM)))
+        children.append(render.Padding(pad = (x, y, 0, 0), child = render.Box(width = 1, height = 1, color = FLOWER_COLOR)))
     elif stage == 3:
-        # Harvestable: golden pulse animation
-        children.append(render.Padding(pad = (x, 12, 0, 0), child = render.Box(width = 2, height = 3, color = "#228822")))
+        # Harvestable: bright magenta flower with pulse
+        children.append(render.Padding(pad = (x, y + 1, 0, 0), child = render.Box(width = 1, height = 1, color = FLOWER_STEM)))
         children.append(animation.Transformation(
-            child = render.Padding(pad = (x, 12, 0, 0), child = render.Box(width = 2, height = 1, color = "#ddaa00")),
+            child = render.Padding(pad = (x, y, 0, 0), child = render.Box(width = 1, height = 1, color = FLOWER_COLOR)),
             duration = 15,
             delay = 0,
             direction = "alternate",
             fill_mode = "forwards",
             keyframes = [
                 animation.Keyframe(percentage = 0.0, transforms = [animation.Scale(1.0, 1.0)], curve = "ease_in_out"),
-                animation.Keyframe(percentage = 1.0, transforms = [animation.Scale(0.8, 0.8)]),
+                animation.Keyframe(percentage = 1.0, transforms = [animation.Scale(1.5, 1.5)]),
             ],
         ))
 
