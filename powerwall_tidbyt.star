@@ -1144,37 +1144,33 @@ def _snow_flake(x, delay, duration = 40):
     )
 
 def _clear_night_scene(sun_elevation):
-    """Clear night: moon in top-left corner. Stars come from sky background layer."""
-    moon_y = _elevation_to_y(sun_elevation, True)
-    children = _big_crescent(1, moon_y)
+    """Clear night: moon pinned to top-left corner (y=0)."""
+    children = _big_crescent(1, 0)
     return render.Stack(children = children)
 
 def _clear_day_scene(sun_elevation):
-    """Clear day without solar panel: sun in top-left corner."""
-    sun_y = _elevation_to_y(sun_elevation, False)
+    """Clear day without solar panel: sun pinned to top-left corner (y=0)."""
     children = [
-        # Sun core (5x5 with bright center), left-aligned
-        render.Padding(pad = (2, sun_y, 0, 0), child = render.Box(width = 5, height = 5, color = SUN_DIM_RAY)),
-        render.Padding(pad = (3, sun_y + 1, 0, 0), child = render.Box(width = 3, height = 3, color = SUN_BRIGHT_CORE)),
+        # Sun core (5x5 with bright center), top-left
+        render.Padding(pad = (2, 0, 0, 0), child = render.Box(width = 5, height = 5, color = SUN_DIM_RAY)),
+        render.Padding(pad = (3, 1, 0, 0), child = render.Box(width = 3, height = 3, color = SUN_BRIGHT_CORE)),
     ]
-    # Animated rays
-    ray_pads = [(2, sun_y - 1), (7, sun_y - 1), (1, sun_y + 2), (8, sun_y + 2), (2, sun_y + 5), (7, sun_y + 5)]
+    # Animated rays around sun at y=0
+    ray_pads = [(7, 0), (1, 2), (8, 2), (2, 5), (7, 5)]
     ray_children = []
     for px, py in ray_pads:
-        if py >= 0 and py < 32:
-            ray_children.append(render.Padding(pad = (px, py, 0, 0), child = render.Box(width = 1, height = 1, color = SUN_BRIGHT_RAY)))
-    if ray_children:
-        children.append(animation.Transformation(
-            child = render.Stack(children = ray_children),
-            duration = 50,
-            delay = 0,
-            direction = "alternate",
-            fill_mode = "forwards",
-            keyframes = [
-                animation.Keyframe(percentage = 0.0, transforms = [animation.Scale(1.0, 1.0)], curve = "ease_in_out"),
-                animation.Keyframe(percentage = 1.0, transforms = [animation.Scale(0.0, 0.0)]),
-            ],
-        ))
+        ray_children.append(render.Padding(pad = (px, py, 0, 0), child = render.Box(width = 1, height = 1, color = SUN_BRIGHT_RAY)))
+    children.append(animation.Transformation(
+        child = render.Stack(children = ray_children),
+        duration = 50,
+        delay = 0,
+        direction = "alternate",
+        fill_mode = "forwards",
+        keyframes = [
+            animation.Keyframe(percentage = 0.0, transforms = [animation.Scale(1.0, 1.0)], curve = "ease_in_out"),
+            animation.Keyframe(percentage = 1.0, transforms = [animation.Scale(0.0, 0.0)]),
+        ],
+    ))
     return render.Stack(children = children)
 
 def build_weather_scene(weather_icon, sun_elevation = 0.0, is_night = True):
