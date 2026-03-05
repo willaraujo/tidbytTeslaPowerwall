@@ -1488,20 +1488,22 @@ def _activity_seed(config):
     return ((m * 31 + d) * 24 + h) % 100
 
 def build_life_overlay(config):
-    """Build character/activity overlay based on deterministic seed + weather context."""
+    """Build character/activity overlay. Uses game engine if active, else seed-based fallback."""
+    if config.get("gactive", "false") == "true":
+        return _build_game_overlay(config)
+
+    # Fallback: seed-based scenes (when game engine not running)
     seed = _activity_seed(config)
     is_night = config.get("is_night", "false") == "true"
     weather = config.get("weather_icon", "clear-day")
     children = []
 
-    # Weather-specific scenes take priority
     if is_night and weather in ("rain", "sleet") and seed < 50:
         children = _scene_pond_fishing()
     elif weather == "snow" and 40 <= seed and seed < 55:
         children = _scene_snowball()
     elif is_night and "clear" in weather and 85 <= seed and seed < 90:
         children = _scene_fireworks()
-    # Standard scenes
     elif seed < 20:
         children = _scene_leaving_home()
     elif seed < 40:
@@ -1528,6 +1530,223 @@ def build_life_overlay(config):
     if not children:
         return None
     return render.Box(width = 64, height = 32, child = render.Stack(children = children))
+
+# --- Game overlay: persistent survival simulation rendering ---
+
+# Speed → animation duration mapping (behavioral cues, no stats shown)
+GAME_SPEED_DUR = {"slow": 140, "mid": 80, "fast": 50}
+GAME_SHIRTS = {"parent1": "#4488cc", "parent2": "#cc4444", "kid": "#44cc44"}
+
+def _build_game_overlay(config):
+    """Parse game state params and render characters, threats, crops with behavioral animations."""
+    children = []
+
+    # Characters: "id:x:target_x:state:alive:speed"
+    gc = config.get("gc", "")
+    if gc:
+        for entry in gc.split("|"):
+            parts = entry.split(":")
+            if len(parts) >= 6:
+                children.extend(_render_game_char(parts))
+
+    # Pets: "id:x:alive"
+    gp = config.get("gp", "")
+    if gp:
+        for entry in gp.split("|"):
+            parts = entry.split(":")
+            if len(parts) >= 3:
+                children.extend(_render_game_pet(parts))
+
+    # Threats: "type:x:state"
+    gt = config.get("gt", "")
+    if gt:
+        for entry in gt.split("|"):
+            parts = entry.split(":")
+            if len(parts) >= 3:
+                children.extend(_render_game_threat(parts))
+
+    # Crops: "x:stage"
+    gcr = config.get("gcr", "")
+    if gcr:
+        for entry in gcr.split("|"):
+            parts = entry.split(":")
+            if len(parts) >= 2:
+                children.extend(_render_crop(parts))
+
+    if not children:
+        return None
+    return render.Box(width = 64, height = 32, child = render.Stack(children = children))
+
+def _render_game_char(parts):
+    """Render one game character based on state — behavior only, no stats."""
+    char_id = parts[0]
+    x = int(parts[1])
+    target_x = int(parts[2])
+    state = parts[3]
+    alive = parts[4] == "1"
+    speed = parts[5]
+
+    shirt = GAME_SHIRTS.get(char_id, "#4488cc")
+    children = []
+
+    if not alive:
+        # Gravestone cross at home area (each character offset slightly)
+        gx = 28 if char_id == "parent1" else (30 if char_id == "parent2" else 32)
+        children.append(render.Padding(pad = (gx, 12, 0, 0), child = render.Box(width = 1, height = 3, color = "#666666")))
+        children.append(render.Padding(pad = (gx - 1, 13, 0, 0), child = render.Box(width = 3, height = 1, color = "#666666")))
+        return children
+
+    dur = GAME_SPEED_DUR.get(speed, 80)
+
+    if state == "fighting":
+        # Rapid jitter — character vibrates at threat position
+        children.append(animation.Transformation(
+            child = _pixel_person(0, 11, shirt),
+            duration = 8,
+            delay = 0,
+            direction = "alternate",
+            fill_mode = "forwards",
+            keyframes = [
+                animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(x - 1, 0)]),
+                animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(x + 1, 0)]),
+            ],
+        ))
+    elif state == "farming":
+        # Bobbing up/down at crop position (tending crops)
+        children.append(animation.Transformation(
+            child = _pixel_person(0, 11, shirt),
+            duration = 20,
+            delay = 0,
+            direction = "alternate",
+            fill_mode = "forwards",
+            keyframes = [
+                animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(x, 0)]),
+                animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(x, -1)]),
+            ],
+        ))
+    elif state == "fishing":
+        # Sitting at pond edge with twitching fishing rod
+        children.append(render.Padding(pad = (x, 10, 0, 0), child = render.Box(width = 1, height = 1, color = CHAR_SKIN)))
+        children.append(render.Padding(pad = (x - 1, 11, 0, 0), child = render.Box(width = 3, height = 1, color = shirt)))
+        children.append(render.Padding(pad = (x - 1, 12, 0, 0), child = render.Box(width = 2, height = 1, color = CHAR_PANTS)))
+        # Rod with twitch
+        children.append(render.Padding(pad = (x + 2, 9, 0, 0), child = render.Box(width = 1, height = 1, color = "#885533")))
+        children.append(animation.Transformation(
+            child = render.Padding(pad = (x + 2, 10, 0, 0), child = render.Box(width = 1, height = 4, color = "#885533")),
+            duration = 30,
+            delay = 0,
+            direction = "alternate",
+            fill_mode = "forwards",
+            keyframes = [
+                animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(0, 0)]),
+                animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(1, 0)]),
+            ],
+        ))
+    elif state == "fleeing":
+        # Double-speed dash toward home
+        children.append(_walking_person(shirt, x, target_x, 11, 40))
+    elif x != target_x:
+        # Walking to target at speed determined by HP (hidden)
+        children.append(_walking_person(shirt, x, target_x, 11, dur))
+    else:
+        # Static/idle at position
+        children.append(_pixel_person(x, 11, shirt))
+
+    return children
+
+def _render_game_pet(parts):
+    """Render game pet (dog/cat) at position."""
+    pet_id = parts[0]
+    x = int(parts[1])
+    alive = parts[2] == "1"
+    if not alive:
+        return []
+    if pet_id == "dog":
+        return [_pixel_dog(x, 12)]
+    elif pet_id == "cat":
+        return [_pixel_cat(x, 13)]
+    return []
+
+def _render_game_threat(parts):
+    """Render approaching threat with menacing animation."""
+    threat_type = parts[0]
+    x = int(parts[1])
+    children = []
+
+    if threat_type == "yeti":
+        # Yeti stomps toward house with slight shake
+        children.append(animation.Transformation(
+            child = _pixel_yeti(0, 10),
+            duration = 15,
+            delay = 0,
+            direction = "alternate",
+            fill_mode = "forwards",
+            keyframes = [
+                animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(x, 0)]),
+                animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(x - 1, 0)]),
+            ],
+        ))
+    elif threat_type == "ufo":
+        # UFO hovering at sky level
+        children.append(animation.Transformation(
+            child = _pixel_ufo(0, 2),
+            duration = 20,
+            delay = 0,
+            direction = "alternate",
+            fill_mode = "forwards",
+            keyframes = [
+                animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(x, 0)]),
+                animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(x, -1)]),
+            ],
+        ))
+    elif threat_type == "raider":
+        # Raider: red-shirted person walking menacingly
+        children.append(animation.Transformation(
+            child = _pixel_person(0, 11, "#ff0000"),
+            duration = 12,
+            delay = 0,
+            direction = "alternate",
+            fill_mode = "forwards",
+            keyframes = [
+                animation.Keyframe(percentage = 0.0, transforms = [animation.Translate(x, 0)]),
+                animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(x - 1, 0)]),
+            ],
+        ))
+
+    return children
+
+def _render_crop(parts):
+    """Render crop at growth stage 0-3."""
+    x = int(parts[0])
+    stage = int(parts[1])
+    children = []
+
+    if stage == 0:
+        # Seed: tiny brown dot
+        children.append(render.Padding(pad = (x, 14, 0, 0), child = render.Box(width = 1, height = 1, color = "#885533")))
+    elif stage == 1:
+        # Sprout: small green shoot
+        children.append(render.Padding(pad = (x, 13, 0, 0), child = render.Box(width = 1, height = 2, color = "#228822")))
+    elif stage == 2:
+        # Grown: taller green with yellow tip
+        children.append(render.Padding(pad = (x, 12, 0, 0), child = render.Box(width = 1, height = 3, color = "#228822")))
+        children.append(render.Padding(pad = (x, 12, 0, 0), child = render.Box(width = 1, height = 1, color = "#ddaa00")))
+    elif stage == 3:
+        # Harvestable: golden pulse animation
+        children.append(render.Padding(pad = (x, 12, 0, 0), child = render.Box(width = 2, height = 3, color = "#228822")))
+        children.append(animation.Transformation(
+            child = render.Padding(pad = (x, 12, 0, 0), child = render.Box(width = 2, height = 1, color = "#ddaa00")),
+            duration = 15,
+            delay = 0,
+            direction = "alternate",
+            fill_mode = "forwards",
+            keyframes = [
+                animation.Keyframe(percentage = 0.0, transforms = [animation.Scale(1.0, 1.0)], curve = "ease_in_out"),
+                animation.Keyframe(percentage = 1.0, transforms = [animation.Scale(0.8, 0.8)]),
+            ],
+        ))
+
+    return children
 
 # --- Full-width sky & weather overlay (64x32) ---
 
