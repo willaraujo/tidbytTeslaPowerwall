@@ -463,20 +463,20 @@ class GameEngine:
 
         # 1. FLEE — low HP and threat nearby
         flee_threshold = 3 if char["trait"] == "fast" else 2
-        if char["hp"] <= flee_threshold and threat_dist < 10:
+        if char["hp"] <= flee_threshold and threat_dist < 6:
             char["state"] = "fleeing"
             char["target_x"] = HOME_X
             return
 
         # 2. FIGHT — threat nearby, brave enough
-        if char["trait"] != "cautious" and threat_dist < (12 if char["trait"] == "brave" else 8) and char["hp"] > 2:
+        if char["trait"] != "cautious" and threat_dist < (8 if char["trait"] == "brave" else 5) and char["hp"] > 2:
             nearest = min(self.state["threats"], key=lambda t: abs(char["x"] - t["x"]))
             char["state"] = "fighting"
             char["target_x"] = nearest["x"]
             return
 
         # 3. DEFEND — threat near house, no one else fighting it
-        if threat_dist < 15 and len(fighting_chars) == 0 and char["hp"] > 2:
+        if threat_dist < 10 and len(fighting_chars) == 0 and char["hp"] > 2:
             nearest = min(self.state["threats"], key=lambda t: abs(char["x"] - t["x"]))
             char["state"] = "fighting"
             char["target_x"] = nearest["x"]
@@ -510,7 +510,7 @@ class GameEngine:
             return
 
         # 5. PLANT — empty slot, night, have food
-        if is_night and self.state["world"]["food"] > 20 and threat_dist > 15:
+        if is_night and self.state["world"]["food"] > 20 and threat_dist > 8:
             used_xs = {c["x"] for c in self.state["world"]["crops"]}
             empty_slots = [s for s in CROP_SLOTS if s[0] not in used_xs]
             if empty_slots:
@@ -546,7 +546,7 @@ class GameEngine:
             return
 
         # 7. HEAL — at home, safe, have food
-        if char["hp"] < char["max_hp"] and abs(char["x"] - HOME_X) <= 3 and threat_dist > 20 and self.state["world"]["food"] > 10:
+        if char["hp"] < char["max_hp"] and abs(char["x"] - HOME_X) <= 3 and threat_dist > 8 and self.state["world"]["food"] > 10:
             char["state"] = "idle"
             char["target_x"] = HOME_X
             if self.state["tick"] % 5 == 0:
@@ -556,14 +556,16 @@ class GameEngine:
             return
 
         # 8. PATROL — default daytime, stay within col1 game area
+        # Only pick a new target when idle or already reached current target
         if not is_night:
-            char["state"] = "patrol"
-            if char["trait"] == "brave":
-                char["target_x"] = random.randint(14, GAME_X_MAX)
-            elif char["trait"] == "cautious":
-                char["target_x"] = random.randint(GAME_X_MIN, 8)
-            else:
-                char["target_x"] = random.randint(5, 15)
+            if char["state"] != "patrol" or abs(char["x"] - char["target_x"]) <= 1:
+                char["state"] = "patrol"
+                if char["trait"] == "brave":
+                    char["target_x"] = random.randint(14, GAME_X_MAX)
+                elif char["trait"] == "cautious":
+                    char["target_x"] = random.randint(GAME_X_MIN, 8)
+                else:
+                    char["target_x"] = random.randint(5, 15)
             return
 
         # 9. SLEEP — night, safe, nothing to do
@@ -579,9 +581,9 @@ class GameEngine:
         dead_threats = []
         for threat in self.state["threats"]:
             for char in self.state["characters"]:
-                if not char["alive"]:
+                if not char["alive"] or char["state"] != "fighting":
                     continue
-                if abs(char["x"] - threat["x"]) <= 4:
+                if abs(char["x"] - threat["x"]) <= 2:
                     # Combat!
                     char_dmg = 1
                     if char["trait"] == "brave":
@@ -624,7 +626,7 @@ class GameEngine:
             hp_ratio = char["hp"] / char["max_hp"] if char["max_hp"] > 0 else 0
             speed = 1
             if char["state"] == "fleeing":
-                speed = 3
+                speed = 2
             elif char["trait"] == "fast":
                 speed = 2
             elif hp_ratio < 0.33:
@@ -693,8 +695,8 @@ class GameEngine:
                             direction = threat.get("dir", -1)
                             retreat = 5 * (-direction)  # push back the way it came
                             threat["x"] += retreat
-                            # If pushed off screen, remove it
-                            if threat["x"] > 63 or threat["x"] < 0:
+                            # If pushed off game area, remove it
+                            if threat["x"] > GAME_X_MAX or threat["x"] < GAME_X_MIN:
                                 self.state["threats"].remove(threat)
                                 self.state["world"]["last_event"] = "yeti_scared"
                                 logger.info("Game: Dog scared off yeti!")
