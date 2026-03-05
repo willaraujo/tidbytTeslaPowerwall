@@ -1823,6 +1823,10 @@ def _render_crop(parts):
                 animation.Keyframe(percentage = 1.0, transforms = [animation.Scale(1.5, 1.5)]),
             ],
         ))
+    elif stage == 4:
+        # Withered: dark brown drooping plant — visually distinct from all living stages
+        children.append(render.Padding(pad = (x, y + 1, 0, 0), child = render.Box(width = 1, height = 1, color = "#664422")))
+        children.append(render.Padding(pad = (x, y, 0, 0), child = render.Box(width = 1, height = 1, color = "#442200")))
 
     return children
 
