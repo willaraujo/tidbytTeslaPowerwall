@@ -1672,6 +1672,17 @@ def _render_game_char(parts):
                 animation.Keyframe(percentage = 1.0, transforms = [animation.Translate(1, 0)]),
             ],
         ))
+    elif state == "returning":
+        # Walking home with supplies — steady pace
+        if x != target_x:
+            step = min(abs(target_x - x), 2)
+            if target_x > x:
+                end_x = _clamp_game_x(x + step)
+            else:
+                end_x = _clamp_game_x(x - step)
+            children.append(_walking_person(shirt, x, end_x, GAME_WALK_Y, dur))
+        else:
+            children.append(_pixel_person(x, GAME_WALK_Y, shirt))
     elif state == "fleeing":
         # Double-speed dash — animate a small step toward target for visual motion
         step = 2 if target_x > x else -2
@@ -1872,12 +1883,14 @@ def build_weather_overlay(weather_icon, is_night):
     return render.Box(width = 64, height = 32, child = render.Stack(children = children))
 
 def _overlay_clouds(count):
-    """Clouds drifting across full 64px width."""
+    """Clouds drifting across full 64px width. Duration tuned so clouds complete
+    their journey within the Tidbyt display cycle (~75 frames at 200ms delay)."""
     children = []
     configs = [
-        ("#3a3a3a", "large", 3, 160, 0),
-        ("#555555", "medium", 8, 130, 40),
-        ("#4a4a4a", "small", 5, 180, 80),
+        # color, size, y, duration, delay — durations fit within 75 frames
+        ("#3a3a3a", "large", 3, 70, 0),
+        ("#555555", "medium", 8, 60, 10),
+        ("#4a4a4a", "small", 5, 50, 25),
     ]
     for i in range(min(count, len(configs))):
         color, size, y, dur, delay = configs[i]

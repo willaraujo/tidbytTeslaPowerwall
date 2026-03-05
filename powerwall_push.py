@@ -254,9 +254,9 @@ CROP_STAGE_TICKS = [10, 15, 20]  # seed->sprout, sprout->grown, grown->harvestab
 
 # Character templates for initial state
 CHAR_TEMPLATES = [
-    {"id": "parent1", "shirt": "#4488cc", "max_hp": 10, "trait": "brave"},
-    {"id": "parent2", "shirt": "#cc4444", "max_hp": 10, "trait": "cautious"},
-    {"id": "kid", "shirt": "#44cc44", "max_hp": 6, "trait": "fast"},
+    {"id": "parent1", "shirt": "#4488cc", "max_hp": 10, "trait": "brave", "home_offset": -3},
+    {"id": "parent2", "shirt": "#cc4444", "max_hp": 10, "trait": "cautious", "home_offset": 0},
+    {"id": "kid", "shirt": "#44cc44", "max_hp": 6, "trait": "fast", "home_offset": 3},
 ]
 PET_TEMPLATES = [
     {"id": "dog"},
@@ -277,6 +277,11 @@ class GameEngine:
                 with open(GAME_STATE_FILE) as f:
                     state = json.load(f)
                 if state.get("version") == 1:
+                    # Backfill home_offset for saves from older versions
+                    offset_map = {t["id"]: t["home_offset"] for t in CHAR_TEMPLATES}
+                    for char in state.get("characters", []):
+                        if "home_offset" not in char:
+                            char["home_offset"] = offset_map.get(char["id"], 0)
                     logger.info("Loaded game state: tick=%d day=%d", state["tick"], state["day_number"])
                     return state
                 logger.warning("Game state version mismatch, reinitializing")
@@ -288,11 +293,13 @@ class GameEngine:
         """Create fresh game state."""
         chars = []
         for t in CHAR_TEMPLATES:
+            home_x = max(GAME_X_MIN, min(GAME_X_MAX, HOME_X + t["home_offset"]))
             chars.append({
                 "id": t["id"], "shirt": t["shirt"],
                 "hp": t["max_hp"], "max_hp": t["max_hp"],
-                "x": HOME_X, "state": "idle", "target_x": HOME_X,
+                "x": home_x, "state": "idle", "target_x": home_x,
                 "alive": True, "trait": t["trait"], "revive_timer": 0,
+                "home_offset": t["home_offset"],
             })
         pets = [{"id": t["id"], "x": HOME_X, "alive": True, "deployed": False} for i, t in enumerate(PET_TEMPLATES)]
         return {
@@ -456,16 +463,35 @@ class GameEngine:
             return 999
         return min(abs(char["x"] - t["x"]) for t in self.state["threats"])
 
+    def _char_home_x(self, char):
+        """Per-character home position so they don't all stack at HOME_X."""
+        offset = char.get("home_offset", 0)
+        return max(GAME_X_MIN, min(GAME_X_MAX, HOME_X + offset))
+
     def _character_decide(self, char, is_night, battery_pct, weather_icon):
         """Priority-based behavior tree for one character."""
         threat_dist = self._nearest_threat_dist(char)
         fighting_chars = [c for c in self.state["characters"] if c["alive"] and c["state"] == "fighting"]
+        my_home = self._char_home_x(char)
+
+        # 0. RETURNING — must finish walking home before taking new tasks
+        #    Only combat/flee can interrupt a return trip
+        if char["state"] == "returning":
+            if abs(char["x"] - my_home) <= 1:
+                # Arrived home — now idle
+                char["state"] = "idle"
+                char["x"] = my_home
+                char["target_x"] = my_home
+            elif threat_dist < 4 and char["hp"] > 2:
+                pass  # fall through to flee/fight checks below
+            else:
+                return  # keep walking home
 
         # 1. FLEE — low HP and threat nearby
         flee_threshold = 3 if char["trait"] == "fast" else 2
         if char["hp"] <= flee_threshold and threat_dist < 6:
             char["state"] = "fleeing"
-            char["target_x"] = HOME_X
+            char["target_x"] = my_home
             return
 
         # 2. FIGHT — threat nearby, brave enough
@@ -482,12 +508,16 @@ class GameEngine:
             char["target_x"] = nearest["x"]
             return
 
-        # 4. HARVEST — ripe crops at night
+        # 4. HARVEST — ripe crops at night (only one char per crop)
         harvestable = [c for c in self.state["world"]["crops"] if c["stage"] >= 3]
-        if harvestable and is_night and self.state["world"]["food"] < 50:
-            crop = harvestable[0]
+        # Filter out crops another character is already heading to
+        busy_targets = {c["target_x"] for c in self.state["characters"]
+                        if c["alive"] and c["id"] != char["id"] and c["state"] == "farming"}
+        available_crops = [c for c in harvestable if c["x"] not in busy_targets]
+        if available_crops and is_night and self.state["world"]["food"] < 50:
+            crop = min(available_crops, key=lambda c: abs(char["x"] - c["x"]))
             if abs(char["x"] - crop["x"]) <= 2:
-                # At crop — harvest. Further from house = better yield.
+                # At crop — harvest then return home with supplies
                 distance = abs(crop["x"] - HOME_X)
                 base_yield = 15 + random.randint(0, 10)
                 distance_bonus = int(distance * 0.5)
@@ -499,10 +529,11 @@ class GameEngine:
                 crop["planted_tick"] = self.state["tick"]
                 crop["stage_tick"] = self.state["tick"]
                 crop["growth_rate"] = round(random.uniform(0.7, 1.3), 2)
-                char["state"] = "idle"
-                char["target_x"] = HOME_X
+                # Return home with supplies — won't take new tasks until home
+                char["state"] = "returning"
+                char["target_x"] = my_home
                 self.state["world"]["last_event"] = "harvest"
-                logger.info("Game: %s harvested crop at x=%d, yield=%d, food=%d (auto-replanted)",
+                logger.info("Game: %s harvested crop at x=%d, yield=%d, food=%d (returning home)",
                             char["id"], crop["x"], total, self.state["world"]["food"])
             else:
                 char["state"] = "farming"
@@ -512,29 +543,31 @@ class GameEngine:
         # 5. PLANT — empty slot, night, have food
         if is_night and self.state["world"]["food"] > 20 and threat_dist > 8:
             used_xs = {c["x"] for c in self.state["world"]["crops"]}
-            empty_slots = [s for s in CROP_SLOTS if s[0] not in used_xs]
+            busy_plant = {c["target_x"] for c in self.state["characters"]
+                          if c["alive"] and c["id"] != char["id"] and c["state"] == "farming"}
+            empty_slots = [s for s in CROP_SLOTS if s[0] not in used_xs and s[0] not in busy_plant]
             if empty_slots:
-                slot_x, slot_y = empty_slots[0]
+                # Pick nearest empty slot to this character
+                slot_x, slot_y = min(empty_slots, key=lambda s: abs(char["x"] - s[0]))
                 if abs(char["x"] - slot_x) <= 2:
-                    # At slot — plant
+                    # At slot — plant, then return home
                     self.state["world"]["crops"].append({
                         "x": slot_x, "y": slot_y, "stage": 0,
                         "planted_tick": self.state["tick"],
                         "stage_tick": self.state["tick"],
                         "growth_rate": round(random.uniform(0.7, 1.3), 2),
                     })
-                    char["state"] = "idle"
-                    char["target_x"] = HOME_X
-                    logger.info("Game: %s planted crop at x=%d,y=%d", char["id"], slot_x, slot_y)
+                    char["state"] = "returning"
+                    char["target_x"] = my_home
+                    logger.info("Game: %s planted crop at x=%d,y=%d (returning home)", char["id"], slot_x, slot_y)
                 else:
                     char["state"] = "farming"
                     char["target_x"] = slot_x
                 return
 
-        # 6. FISH — low food, no harvestable crops, pond must be active (rainstorm + col1 free)
+        # 6. FISH — low food, no harvestable crops, pond must be active
         if self.state["world"]["food"] < 30 and not harvestable and self.state["world"].get("pond_active", False):
             if abs(char["x"] - POND_X) <= 2:
-                # At pond — fish
                 char["state"] = "fishing"
                 char["target_x"] = POND_X
                 if random.random() < 0.30:
@@ -546,9 +579,9 @@ class GameEngine:
             return
 
         # 7. HEAL — at home, safe, have food
-        if char["hp"] < char["max_hp"] and abs(char["x"] - HOME_X) <= 3 and threat_dist > 8 and self.state["world"]["food"] > 10:
+        if char["hp"] < char["max_hp"] and abs(char["x"] - my_home) <= 3 and threat_dist > 8 and self.state["world"]["food"] > 10:
             char["state"] = "idle"
-            char["target_x"] = HOME_X
+            char["target_x"] = my_home
             if self.state["tick"] % 5 == 0:
                 heal_amt = 2 if battery_pct >= 80 else 1
                 char["hp"] = min(char["max_hp"], char["hp"] + heal_amt)
@@ -556,21 +589,22 @@ class GameEngine:
             return
 
         # 8. PATROL — default daytime, stay within col1 game area
-        # Only pick a new target when idle or already reached current target
+        # Only pick a new target when not already patrolling or reached current target
         if not is_night:
             if char["state"] != "patrol" or abs(char["x"] - char["target_x"]) <= 1:
                 char["state"] = "patrol"
+                # Each character patrols a different zone to avoid stacking
                 if char["trait"] == "brave":
                     char["target_x"] = random.randint(14, GAME_X_MAX)
                 elif char["trait"] == "cautious":
-                    char["target_x"] = random.randint(GAME_X_MIN, 8)
+                    char["target_x"] = random.randint(GAME_X_MIN, 6)
                 else:
-                    char["target_x"] = random.randint(5, 15)
+                    char["target_x"] = random.randint(7, 13)
             return
 
         # 9. SLEEP — night, safe, nothing to do
         char["state"] = "idle"
-        char["target_x"] = HOME_X
+        char["target_x"] = my_home
         if self.state["tick"] % 10 == 0 and char["hp"] < char["max_hp"]:
             char["hp"] = min(char["max_hp"], char["hp"] + 1)
 
@@ -747,11 +781,12 @@ class GameEngine:
             if min_timer <= -100:
                 logger.info("Game: Colony collapse! New generation spawning.")
                 for char in self.state["characters"]:
+                    my_home = self._char_home_x(char)
                     char["alive"] = True
                     char["hp"] = char["max_hp"]
-                    char["x"] = HOME_X
+                    char["x"] = my_home
                     char["state"] = "idle"
-                    char["target_x"] = HOME_X
+                    char["target_x"] = my_home
                     char["revive_timer"] = 0
                 self.state["world"]["food"] = 50
                 self.state["world"]["crops"] = []
@@ -766,11 +801,12 @@ class GameEngine:
             # Revival thresholds based on battery
             threshold = -30 if battery_pct > 50 else (-60 if battery_pct > 20 else -120)
             if char["revive_timer"] <= threshold:
+                my_home = self._char_home_x(char)
                 char["alive"] = True
                 char["hp"] = char["max_hp"] // 2
-                char["x"] = HOME_X
+                char["x"] = my_home
                 char["state"] = "idle"
-                char["target_x"] = HOME_X
+                char["target_x"] = my_home
                 char["revive_timer"] = 0
                 self.state["world"]["last_event"] = f"{char['id']}_revived"
                 logger.info("Game: %s revived with %d HP", char["id"], char["hp"])
