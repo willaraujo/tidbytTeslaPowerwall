@@ -9,6 +9,7 @@ import base64
 import json
 import logging
 import os
+import random
 import subprocess
 import sys
 import time
@@ -220,7 +221,516 @@ def fetch_weather_pirate(config):
         return dict(DEFAULT_WEATHER)
 
 
-def render_pixlet(sensor_data, weather_data, config=None):
+# ---------------------------------------------------------------------------
+# Game Engine: Persistent survival simulation
+# ---------------------------------------------------------------------------
+
+GAME_STATE_FILE = SCRIPT_DIR / "game_state.json"
+
+# Pixel zones on the 64x32 display
+ZONE_CROPS = (2, 18)   # Col1: crop fields
+ZONE_HOME = (20, 43)   # Col2: safe zone (house)
+ZONE_WILD = (44, 63)   # Col3: wilderness
+HOME_X = 30            # House door x-position
+POND_X = 8             # Fishing pond position
+CROP_SLOTS = [4, 8, 12, 16]  # Fixed crop x-positions
+MAX_FOOD = 100
+
+# Crop growth ticks per stage (base values, modified by growth_rate)
+CROP_STAGE_TICKS = [10, 15, 20]  # seed->sprout, sprout->grown, grown->harvestable
+
+# Character templates for initial state
+CHAR_TEMPLATES = [
+    {"id": "parent1", "shirt": "#4488cc", "max_hp": 10, "trait": "brave"},
+    {"id": "parent2", "shirt": "#cc4444", "max_hp": 10, "trait": "cautious"},
+    {"id": "kid", "shirt": "#44cc44", "max_hp": 6, "trait": "fast"},
+]
+PET_TEMPLATES = [
+    {"id": "dog"},
+    {"id": "cat"},
+]
+
+
+class GameEngine:
+    """Persistent survival simulation driven by real Powerwall data."""
+
+    def __init__(self):
+        self.state = self._load_or_init()
+
+    def _load_or_init(self):
+        """Load state from disk or create initial state."""
+        if GAME_STATE_FILE.exists():
+            try:
+                with open(GAME_STATE_FILE) as f:
+                    state = json.load(f)
+                if state.get("version") == 1:
+                    logger.info("Loaded game state: tick=%d day=%d", state["tick"], state["day_number"])
+                    return state
+                logger.warning("Game state version mismatch, reinitializing")
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.warning("Corrupt game state (%s), reinitializing", e)
+        return self._init_state()
+
+    def _init_state(self):
+        """Create fresh game state."""
+        chars = []
+        for t in CHAR_TEMPLATES:
+            chars.append({
+                "id": t["id"], "shirt": t["shirt"],
+                "hp": t["max_hp"], "max_hp": t["max_hp"],
+                "x": HOME_X, "state": "idle", "target_x": HOME_X,
+                "alive": True, "trait": t["trait"], "revive_timer": 0,
+            })
+        pets = [{"id": t["id"], "x": HOME_X + 2 + i * 2, "alive": True} for i, t in enumerate(PET_TEMPLATES)]
+        return {
+            "version": 1, "tick": 0, "day_number": 1,
+            "world": {
+                "food": 50, "prosperity": 50,
+                "crops": [], "threat_cooldown": 0, "last_event": "",
+            },
+            "characters": chars,
+            "pets": pets,
+            "threats": [],
+            "was_night": False,
+        }
+
+    def _save(self):
+        """Atomic save: write to .tmp then rename."""
+        tmp = GAME_STATE_FILE.with_suffix(".tmp")
+        with open(tmp, "w") as f:
+            json.dump(self.state, f, separators=(",", ":"))
+        tmp.rename(GAME_STATE_FILE)
+
+    # --- Main tick ---
+
+    def tick(self, sensor_data, weather_data):
+        """Run one game tick. Returns dict of pixlet render params."""
+        is_night = weather_data.get("is_night", "false") == "true"
+        battery_pct = int(sensor_data.get("battery_pct", "0"))
+        solar_power = float(sensor_data.get("solar_power", "0"))
+        grid_status = sensor_data.get("grid_status", "on")
+        weather_icon = weather_data.get("icon", "clear-day")
+
+        # Track day transitions
+        if self.state["was_night"] and not is_night:
+            self.state["day_number"] += 1
+        self.state["was_night"] = is_night
+
+        # Phase 1: Environment
+        self._grow_crops(is_night, battery_pct)
+        self._decay_food()
+
+        # Phase 2: Threats
+        self._spawn_threats(is_night, battery_pct, grid_status)
+        self._move_threats()
+
+        # Phase 3: Character AI
+        alive_chars = [c for c in self.state["characters"] if c["alive"]]
+        for char in alive_chars:
+            self._character_decide(char, is_night, battery_pct, weather_icon)
+
+        # Phase 4: Combat
+        self._resolve_combat()
+
+        # Phase 5: Movement
+        self._move_characters()
+        self._move_pets()
+
+        # Phase 6: Revival
+        self._check_revivals(battery_pct)
+
+        # Phase 7: Starvation
+        self._check_starvation()
+
+        # Phase 8: Prosperity
+        self._update_prosperity(battery_pct, solar_power)
+
+        self.state["tick"] += 1
+        self._save()
+        return self._build_render_params()
+
+    # --- Phase 1: Crops ---
+
+    def _grow_crops(self, is_night, battery_pct):
+        """Advance crop growth. Crops only grow at night (unless solar > 4000)."""
+        if not is_night:
+            return
+        for crop in self.state["world"]["crops"]:
+            if crop["stage"] >= 3:
+                continue  # already harvestable
+            # Calculate ticks needed for this stage
+            base_ticks = CROP_STAGE_TICKS[crop["stage"]]
+            adjusted = int(base_ticks / crop.get("growth_rate", 1.0))
+            if battery_pct >= 80:
+                adjusted = max(1, adjusted // 2)
+            ticks_in_stage = self.state["tick"] - crop.get("stage_tick", crop["planted_tick"])
+            if ticks_in_stage >= adjusted:
+                crop["stage"] += 1
+                crop["stage_tick"] = self.state["tick"]
+            # Wither chance when battery critically low
+            if battery_pct < 20 and random.random() < 0.10:
+                if crop["stage"] > 0:
+                    crop["stage"] -= 1
+                    crop["stage_tick"] = self.state["tick"]
+
+    def _decay_food(self):
+        """Food decreases over time (characters eating)."""
+        if self.state["tick"] % 10 == 0 and self.state["world"]["food"] > 0:
+            self.state["world"]["food"] = max(0, self.state["world"]["food"] - 1)
+
+    # --- Phase 2: Threats ---
+
+    def _spawn_threats(self, is_night, battery_pct, grid_status):
+        """Spawn threats based on conditions. Max 2 active threats."""
+        if len(self.state["threats"]) >= 2:
+            return
+        if self.state["world"]["threat_cooldown"] > 0:
+            self.state["world"]["threat_cooldown"] -= 1
+            return
+
+        base_chance = 15 if is_night else 3
+        if battery_pct < 30:
+            base_chance *= 2
+        if grid_status.lower() != "on":
+            base_chance = 33
+
+        if random.randint(1, 100) <= base_chance:
+            # Pick threat type
+            roll = random.randint(1, 100)
+            if roll <= 50:
+                threat = {"type": "yeti", "x": 62, "hp": 4, "state": "approaching", "speed": 2, "damage": 2}
+            elif roll <= 80:
+                threat = {"type": "raider", "x": 62, "hp": 3, "state": "approaching", "speed": 2, "damage": 1}
+            else:
+                threat = {"type": "ufo", "x": 62, "hp": 2, "state": "approaching", "speed": 3, "damage": 1}
+            self.state["threats"].append(threat)
+            self.state["world"]["threat_cooldown"] = 8
+            self.state["world"]["last_event"] = f"{threat['type']}_spawn"
+            logger.info("Game: %s spawned at x=%d", threat["type"], threat["x"])
+
+    def _move_threats(self):
+        """Move threats toward house."""
+        for threat in self.state["threats"]:
+            if threat["state"] == "approaching":
+                threat["x"] = max(HOME_X - 5, threat["x"] - threat["speed"])
+
+    # --- Phase 3: Character AI ---
+
+    def _nearest_threat_dist(self, char):
+        """Distance to nearest threat from character."""
+        if not self.state["threats"]:
+            return 999
+        return min(abs(char["x"] - t["x"]) for t in self.state["threats"])
+
+    def _character_decide(self, char, is_night, battery_pct, weather_icon):
+        """Priority-based behavior tree for one character."""
+        threat_dist = self._nearest_threat_dist(char)
+        fighting_chars = [c for c in self.state["characters"] if c["alive"] and c["state"] == "fighting"]
+
+        # 1. FLEE — low HP and threat nearby
+        flee_threshold = 3 if char["trait"] == "fast" else 2
+        if char["hp"] <= flee_threshold and threat_dist < 10:
+            char["state"] = "fleeing"
+            char["target_x"] = HOME_X
+            return
+
+        # 2. FIGHT — threat nearby, brave enough
+        if char["trait"] != "cautious" and threat_dist < (12 if char["trait"] == "brave" else 8) and char["hp"] > 2:
+            nearest = min(self.state["threats"], key=lambda t: abs(char["x"] - t["x"]))
+            char["state"] = "fighting"
+            char["target_x"] = nearest["x"]
+            return
+
+        # 3. DEFEND — threat near house, no one else fighting it
+        if threat_dist < 15 and len(fighting_chars) == 0 and char["hp"] > 2:
+            nearest = min(self.state["threats"], key=lambda t: abs(char["x"] - t["x"]))
+            char["state"] = "fighting"
+            char["target_x"] = nearest["x"]
+            return
+
+        # 4. HARVEST — ripe crops at night
+        harvestable = [c for c in self.state["world"]["crops"] if c["stage"] >= 3]
+        if harvestable and is_night and self.state["world"]["food"] < 50:
+            crop = harvestable[0]
+            if abs(char["x"] - crop["x"]) <= 2:
+                # At crop — harvest it
+                bonus = 5 if char["trait"] == "cautious" else 0
+                self.state["world"]["food"] = min(MAX_FOOD, self.state["world"]["food"] + 15 + random.randint(0, 10) + bonus)
+                self.state["world"]["crops"].remove(crop)
+                char["state"] = "idle"
+                char["target_x"] = HOME_X
+                self.state["world"]["last_event"] = "harvest"
+                logger.info("Game: %s harvested crop, food=%d", char["id"], self.state["world"]["food"])
+            else:
+                char["state"] = "farming"
+                char["target_x"] = crop["x"]
+            return
+
+        # 5. PLANT — empty slot, night, have food
+        if is_night and self.state["world"]["food"] > 20 and threat_dist > 15:
+            used_slots = {c["x"] for c in self.state["world"]["crops"]}
+            empty_slots = [s for s in CROP_SLOTS if s not in used_slots]
+            if empty_slots:
+                slot = empty_slots[0]
+                if abs(char["x"] - slot) <= 2:
+                    # At slot — plant
+                    self.state["world"]["crops"].append({
+                        "x": slot, "stage": 0, "planted_tick": self.state["tick"],
+                        "stage_tick": self.state["tick"],
+                        "growth_rate": round(random.uniform(0.7, 1.3), 2),
+                    })
+                    char["state"] = "idle"
+                    char["target_x"] = HOME_X
+                    logger.info("Game: %s planted crop at x=%d", char["id"], slot)
+                else:
+                    char["state"] = "farming"
+                    char["target_x"] = slot
+                return
+
+        # 6. FISH — low food, no harvestable crops, night or raining
+        is_raining = weather_icon in ("rain", "sleet", "thunderstorm")
+        if self.state["world"]["food"] < 30 and not harvestable and (is_night or is_raining):
+            if abs(char["x"] - POND_X) <= 2:
+                # At pond — fish
+                char["state"] = "fishing"
+                char["target_x"] = POND_X
+                if random.random() < 0.30:
+                    self.state["world"]["food"] = min(MAX_FOOD, self.state["world"]["food"] + 5)
+                    logger.info("Game: %s caught a fish, food=%d", char["id"], self.state["world"]["food"])
+            else:
+                char["state"] = "fishing"
+                char["target_x"] = POND_X
+            return
+
+        # 7. HEAL — at home, safe, have food
+        if char["hp"] < char["max_hp"] and abs(char["x"] - HOME_X) <= 3 and threat_dist > 20 and self.state["world"]["food"] > 10:
+            char["state"] = "idle"
+            char["target_x"] = HOME_X
+            if self.state["tick"] % 5 == 0:
+                heal_amt = 2 if battery_pct >= 80 else 1
+                char["hp"] = min(char["max_hp"], char["hp"] + heal_amt)
+                self.state["world"]["food"] = max(0, self.state["world"]["food"] - 2)
+            return
+
+        # 8. PATROL — default daytime
+        if not is_night:
+            char["state"] = "patrol"
+            if char["trait"] == "brave":
+                char["target_x"] = random.randint(40, 55)
+            elif char["trait"] == "cautious":
+                char["target_x"] = random.randint(10, 25)
+            else:
+                char["target_x"] = random.randint(25, 45)
+            return
+
+        # 9. SLEEP — night, safe, nothing to do
+        char["state"] = "idle"
+        char["target_x"] = HOME_X
+        if self.state["tick"] % 10 == 0 and char["hp"] < char["max_hp"]:
+            char["hp"] = min(char["max_hp"], char["hp"] + 1)
+
+    # --- Phase 4: Combat ---
+
+    def _resolve_combat(self):
+        """Resolve combat between characters and threats."""
+        dead_threats = []
+        for threat in self.state["threats"]:
+            for char in self.state["characters"]:
+                if not char["alive"]:
+                    continue
+                if abs(char["x"] - threat["x"]) <= 4:
+                    # Combat!
+                    char_dmg = 1
+                    if char["trait"] == "brave":
+                        char_dmg = 2
+                    # Dog bonus
+                    for pet in self.state["pets"]:
+                        if pet["id"] == "dog" and pet["alive"] and abs(pet["x"] - char["x"]) <= 5:
+                            char_dmg += 1
+                            break
+                    threat["hp"] -= char_dmg
+                    char["hp"] -= threat["damage"]
+                    if char["hp"] <= 0:
+                        char["hp"] = 0
+                        char["alive"] = False
+                        char["state"] = "dead"
+                        char["revive_timer"] = 30
+                        self.state["world"]["last_event"] = f"{char['id']}_died"
+                        logger.info("Game: %s died!", char["id"])
+                    if threat["hp"] <= 0:
+                        dead_threats.append(threat)
+                        self.state["world"]["food"] = min(MAX_FOOD, self.state["world"]["food"] + 10)
+                        self.state["world"]["last_event"] = f"{threat['type']}_killed"
+                        logger.info("Game: %s killed! +10 food", threat["type"])
+                    break  # one combatant per threat per tick
+        for t in dead_threats:
+            if t in self.state["threats"]:
+                self.state["threats"].remove(t)
+
+    # --- Phase 5: Movement ---
+
+    def _move_characters(self):
+        """Move characters toward their target_x."""
+        for char in self.state["characters"]:
+            if not char["alive"] or char["state"] == "idle" or char["state"] == "fishing":
+                continue
+            target = char["target_x"]
+            if char["x"] == target:
+                continue
+            # Speed based on HP ratio
+            hp_ratio = char["hp"] / char["max_hp"] if char["max_hp"] > 0 else 0
+            speed = 1
+            if char["state"] == "fleeing":
+                speed = 3
+            elif char["trait"] == "fast":
+                speed = 2
+            elif hp_ratio < 0.33:
+                speed = 1  # limping, already at 1
+            else:
+                speed = 2 if hp_ratio > 0.75 else 1
+
+            if target > char["x"]:
+                char["x"] = min(target, char["x"] + speed)
+            else:
+                char["x"] = max(target, char["x"] - speed)
+
+    def _move_pets(self):
+        """Move pets to follow nearest alive character."""
+        alive_chars = [c for c in self.state["characters"] if c["alive"]]
+        if not alive_chars:
+            return
+        for pet in self.state["pets"]:
+            if not pet["alive"]:
+                continue
+            # Dog follows nearest character
+            nearest = min(alive_chars, key=lambda c: abs(c["x"] - pet["x"]))
+            target = nearest["x"] + (2 if pet["id"] == "dog" else -2)
+            if abs(pet["x"] - target) > 1:
+                if target > pet["x"]:
+                    pet["x"] = min(target, pet["x"] + 2)
+                else:
+                    pet["x"] = max(target, pet["x"] - 2)
+            # Cat distraction
+            if pet["id"] == "cat":
+                for threat in self.state["threats"]:
+                    if abs(pet["x"] - threat["x"]) < 8 and random.random() < 0.30:
+                        threat["x"] += 1  # push threat back 1px
+
+    # --- Phase 6: Revival ---
+
+    def _check_revivals(self, battery_pct):
+        """Check if dead characters should revive."""
+        all_dead = all(not c["alive"] for c in self.state["characters"])
+
+        # Colony collapse: all dead for 100 ticks = new generation
+        if all_dead:
+            min_timer = min(c["revive_timer"] for c in self.state["characters"])
+            if min_timer <= -100:
+                logger.info("Game: Colony collapse! New generation spawning.")
+                for char in self.state["characters"]:
+                    char["alive"] = True
+                    char["hp"] = char["max_hp"]
+                    char["x"] = HOME_X
+                    char["state"] = "idle"
+                    char["target_x"] = HOME_X
+                    char["revive_timer"] = 0
+                self.state["world"]["food"] = 50
+                self.state["world"]["crops"] = []
+                self.state["world"]["prosperity"] = 30
+                return
+
+        for char in self.state["characters"]:
+            if char["alive"]:
+                continue
+            char["revive_timer"] -= 1
+
+            # Revival thresholds based on battery
+            threshold = -30 if battery_pct > 50 else (-60 if battery_pct > 20 else -120)
+            if char["revive_timer"] <= threshold:
+                char["alive"] = True
+                char["hp"] = char["max_hp"] // 2
+                char["x"] = HOME_X
+                char["state"] = "idle"
+                char["target_x"] = HOME_X
+                char["revive_timer"] = 0
+                self.state["world"]["last_event"] = f"{char['id']}_revived"
+                logger.info("Game: %s revived with %d HP", char["id"], char["hp"])
+
+    # --- Phase 7: Starvation ---
+
+    def _check_starvation(self):
+        """Characters take damage when food is 0."""
+        if self.state["world"]["food"] > 0:
+            return
+        if self.state["tick"] % 5 == 0:
+            for char in self.state["characters"]:
+                if char["alive"]:
+                    char["hp"] -= 1
+                    if char["hp"] <= 0:
+                        char["hp"] = 0
+                        char["alive"] = False
+                        char["state"] = "dead"
+                        char["revive_timer"] = 30
+                        logger.info("Game: %s starved!", char["id"])
+
+    # --- Phase 8: Prosperity ---
+
+    def _update_prosperity(self, battery_pct, solar_power):
+        """Calculate prosperity from power + game state."""
+        food_pct = (self.state["world"]["food"] / MAX_FOOD) * 100
+        alive_count = sum(1 for c in self.state["characters"] if c["alive"])
+        alive_pct = (alive_count / len(self.state["characters"])) * 100
+        solar_score = min(100, (solar_power / 5000) * 100)
+        self.state["world"]["prosperity"] = int(
+            battery_pct * 0.3 + food_pct * 0.3 + alive_pct * 0.2 + solar_score * 0.2
+        )
+
+    # --- Render param serialization ---
+
+    def _build_render_params(self):
+        """Serialize game state to compact pixlet config params."""
+        params = {}
+
+        # Characters: "id:x:target_x:state:alive:speed"
+        chars = []
+        for c in self.state["characters"]:
+            if c["alive"]:
+                ratio = c["hp"] / c["max_hp"] if c["max_hp"] > 0 else 0
+                speed = "slow" if ratio < 0.33 else ("mid" if ratio < 0.75 else "fast")
+            else:
+                speed = "dead"
+            chars.append(f"{c['id']}:{c['x']}:{c['target_x']}:{c['state']}:{1 if c['alive'] else 0}:{speed}")
+        params["gc"] = "|".join(chars)
+
+        # Pets: "id:x:alive"
+        pets = [f"{p['id']}:{p['x']}:{1 if p['alive'] else 0}" for p in self.state["pets"]]
+        params["gp"] = "|".join(pets)
+
+        # Threats: "type:x:state"
+        threats = [f"{t['type']}:{t['x']}:{t['state']}" for t in self.state["threats"]]
+        params["gt"] = "|".join(threats) if threats else ""
+
+        # Crops: "x:stage"
+        crops = [f"{cr['x']}:{cr['stage']}" for cr in self.state["world"]["crops"]]
+        params["gcr"] = "|".join(crops) if crops else ""
+
+        params["gactive"] = "true"
+        return params
+
+
+# Global game engine instance (initialized lazily)
+_game_engine = None
+
+
+def _get_game_engine():
+    """Get or create the global game engine."""
+    global _game_engine
+    if _game_engine is None:
+        _game_engine = GameEngine()
+    return _game_engine
+
+
+def render_pixlet(sensor_data, weather_data, config=None, game_params=None):
     """Invoke pixlet render with sensor data as config params. Returns path to .webp."""
     now = datetime.now()
     seasonal = ""
@@ -245,6 +755,11 @@ def render_pixlet(sensor_data, weather_data, config=None):
         f"hour={now.hour}",
         f"seasonal={seasonal}",
     ]
+
+    # Append game engine params if active
+    if game_params:
+        for key, value in game_params.items():
+            cmd.append(f"{key}={value}")
 
     logger.info("Running: %s", " ".join(cmd))
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
@@ -307,8 +822,12 @@ def run_once(config):
 
     session.close()
 
+    # Run game engine tick
+    engine = _get_game_engine()
+    game_params = engine.tick(sensor_data, weather_data)
+
     # Render via Pixlet
-    webp_path = render_pixlet(sensor_data, weather_data, config)
+    webp_path = render_pixlet(sensor_data, weather_data, config, game_params)
     if webp_path is None:
         logger.error("Render failed, skipping push")
         return False
@@ -392,7 +911,11 @@ def _do_render_push(cache, config):
     sensor_data, weather_data = _cache_to_render_data(cache, config)
     logger.info("WS render: sensors=%s weather=%s", sensor_data, weather_data)
 
-    webp_path = render_pixlet(sensor_data, weather_data, config)
+    # Run game engine tick
+    engine = _get_game_engine()
+    game_params = engine.tick(sensor_data, weather_data)
+
+    webp_path = render_pixlet(sensor_data, weather_data, config, game_params)
     if webp_path is None:
         logger.error("Render failed, skipping push")
         return
