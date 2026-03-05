@@ -1085,16 +1085,6 @@ def _build_bat():
 
 # --- Full-height weather scenes for column 1 (20x32 area) ---
 
-def _elevation_to_y(elevation, is_night):
-    """Map sun/moon elevation to Y pixel position in sky (y=0-4).
-    Higher elevation = higher position (lower Y). Always stays in top sky area."""
-    if is_night:
-        eff = min(abs(elevation), 90.0)
-    else:
-        eff = min(max(elevation, 0.0), 90.0)
-    # Range: elevation 0 -> y=4, elevation 90 -> y=0
-    return int(4 - (eff / 90.0) * 4)
-
 def _big_crescent(x, y):
     """Large crescent moon pixel art (~8px tall) at given position."""
     return [
@@ -1143,12 +1133,12 @@ def _snow_flake(x, delay, duration = 40):
         ),
     )
 
-def _clear_night_scene(sun_elevation):
+def _clear_night_scene():
     """Clear night: moon pinned to top-left corner (y=0)."""
     children = _big_crescent(1, 0)
     return render.Stack(children = children)
 
-def _clear_day_scene(sun_elevation):
+def _clear_day_scene():
     """Clear day without solar panel: sun pinned to top-left corner (y=0)."""
     children = [
         # Sun core (5x5 with bright center), top-left
@@ -1176,8 +1166,8 @@ def _clear_day_scene(sun_elevation):
 def build_weather_scene(weather_icon, sun_elevation = 0.0, is_night = True):
     """Build col1 scene: just sun or moon in top-left. Weather effects come from overlay."""
     if is_night or weather_icon.endswith("-night"):
-        return _clear_night_scene(sun_elevation)
-    return _clear_day_scene(sun_elevation)
+        return _clear_night_scene()
+    return _clear_day_scene()
 
 # --- Full-width sky & weather overlay (64x32) ---
 
@@ -1478,11 +1468,14 @@ def build_weather_overlay(weather_icon, is_night):
     """Full-width weather effects (64x32) that overlay across all columns."""
     children = []
     if weather_icon == "thunderstorm":
+        children.extend(_overlay_clouds(2))
         children.extend(_overlay_rain())
         children.extend(_overlay_lightning())
     elif weather_icon in WEATHER_RAIN:
+        children.extend(_overlay_clouds(1))
         children.extend(_overlay_rain())
     elif weather_icon == "snow":
+        children.extend(_overlay_clouds(1))
         children.extend(_overlay_snow())
     elif weather_icon in WEATHER_CLOUD_FULL:
         children.extend(_overlay_clouds(3))
