@@ -1129,11 +1129,6 @@ def _snow_flake(x, delay, duration = 40):
         ),
     )
 
-def _clear_night_scene():
-    """Clear night: moon pinned to top-left corner (y=0)."""
-    children = _big_crescent(1, 0)
-    return render.Stack(children = children)
-
 def _clear_day_scene():
     """Clear day without solar panel: sun pinned to top-left corner (y=0)."""
     children = [
@@ -1160,9 +1155,10 @@ def _clear_day_scene():
     return render.Stack(children = children)
 
 def build_weather_scene(weather_icon, sun_elevation = 0.0, is_night = True):
-    """Build col1 scene: just sun or moon in top-left. Weather effects come from overlay."""
+    """Build col1 scene: sun during day, empty at night (moon is in sky background layer)."""
     if is_night or weather_icon.endswith("-night"):
-        return _clear_night_scene()
+        # Night: col1 is transparent — moon lives in build_sky_background
+        return render.Box(width = 20, height = 32)
     return _clear_day_scene()
 
 # --- Full-width sky & weather overlay (64x32) ---
@@ -1751,7 +1747,7 @@ def _render_crop(parts):
 # --- Full-width sky & weather overlay (64x32) ---
 
 def build_sky_background(is_night):
-    """Continuous sky background spanning full 64x32. Night: dark navy + stars."""
+    """Continuous sky background spanning full 64x32. Night: dark navy + stars + moon."""
     if not is_night:
         return None
     children = [
@@ -1759,13 +1755,15 @@ def build_sky_background(is_night):
         render.Box(width = 64, height = 16, color = "#0a0a1a"),
     ]
     children.extend(_overlay_stars())
+    # Moon in the sky layer — positioned in upper-left area using full 64px coords
+    children.extend(_big_crescent(2, 1))
     return render.Box(width = 64, height = 32, child = render.Stack(children = children))
 
 def _overlay_stars():
     """Mix of permanent and twinkling stars across full 64px sky."""
     children = []
     # Permanent (static) stars — dim dots always visible
-    for x, y in [(4, 2), (19, 5), (30, 1), (43, 4), (55, 2), (62, 6), (12, 8), (37, 10)]:
+    for x, y in [(10, 2), (19, 5), (30, 1), (43, 4), (55, 2), (62, 6), (12, 8), (37, 10)]:
         children.append(render.Padding(pad = (x, y, 0, 0),
             child = render.Box(width = 1, height = 1, color = "#555566")))
     # Twinkling stars — animated, spread across all columns
