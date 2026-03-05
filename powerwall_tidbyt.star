@@ -1673,11 +1673,18 @@ def _render_game_char(parts):
             ],
         ))
     elif state == "fleeing":
-        # Double-speed dash toward safe area
-        children.append(_walking_person(shirt, x, target_x, GAME_WALK_Y, 40))
+        # Double-speed dash — animate a small step toward target for visual motion
+        step = 2 if target_x > x else -2
+        end_x = _clamp_game_x(x + step)
+        children.append(_walking_person(shirt, x, end_x, GAME_WALK_Y, 40))
     elif x != target_x:
-        # Walking to target at speed determined by HP (hidden)
-        children.append(_walking_person(shirt, x, target_x, GAME_WALK_Y, dur))
+        # Walking: animate a small step toward target (engine moves 1-2px/tick)
+        step = min(abs(target_x - x), 2)
+        if target_x > x:
+            end_x = _clamp_game_x(x + step)
+        else:
+            end_x = _clamp_game_x(x - step)
+        children.append(_walking_person(shirt, x, end_x, GAME_WALK_Y, dur))
     else:
         # Static/idle at position
         children.append(_pixel_person(x, GAME_WALK_Y, shirt))
