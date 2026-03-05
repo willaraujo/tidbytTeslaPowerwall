@@ -252,6 +252,8 @@ MAX_FOOD = 100
 
 # Crop growth ticks per stage (base values, modified by growth_rate)
 CROP_STAGE_TICKS = [10, 15, 20]  # seed->sprout, sprout->grown, grown->harvestable
+CROP_DECAY_TICKS = 60   # ticks at stage 3 before withering (60 ticks ≈ 3.75 min real time)
+CROP_HARD_ZONE_W = 4    # width of hard-to-reach edge zones (x=0-3 and x=16-19)
 
 # Character templates for initial state
 CHAR_TEMPLATES = [
@@ -390,9 +392,19 @@ class GameEngine:
         """Advance crop growth. Crops only grow at night (unless solar > 4000)."""
         if not is_night:
             return
-        for crop in self.state["world"]["crops"]:
-            if crop["stage"] >= 3:
-                continue  # already harvestable
+        to_remove = []
+        for crop in list(self.state["world"]["crops"]):
+            if crop["stage"] == 3:
+                # Decay: transition to withered after CROP_DECAY_TICKS at stage 3
+                ticks_ripe = self.state["tick"] - crop.get("stage_tick", crop["planted_tick"])
+                if ticks_ripe >= CROP_DECAY_TICKS:
+                    crop["stage"] = 4
+                    crop["stage_tick"] = self.state["tick"]
+                continue
+            if crop["stage"] == 4:
+                # Withered: remove next tick and respawn at hard location
+                to_remove.append(crop)
+                continue
             # Calculate ticks needed for this stage
             base_ticks = CROP_STAGE_TICKS[crop["stage"]]
             adjusted = int(base_ticks / crop.get("growth_rate", 1.0))
@@ -407,6 +419,23 @@ class GameEngine:
                 if crop["stage"] > 0:
                     crop["stage"] -= 1
                     crop["stage_tick"] = self.state["tick"]
+
+        for crop in to_remove:
+            self.state["world"]["crops"].remove(crop)
+            self.state["world"]["last_event"] = "crop_withered"
+            logger.info("Game: crop at x=%d withered", crop["x"])
+            # Respawn as a new seed at a hard-to-reach edge location
+            if len(self.state["world"]["crops"]) < MAX_CROPS:
+                spot = self._find_hard_crop_spot()
+                if spot:
+                    sx, sy = spot
+                    self.state["world"]["crops"].append({
+                        "x": sx, "y": sy, "stage": 0,
+                        "planted_tick": self.state["tick"],
+                        "stage_tick": self.state["tick"],
+                        "growth_rate": round(random.uniform(0.7, 1.3), 2),
+                    })
+                    logger.info("Game: crop respawned at hard location x=%d", sx)
 
     def _find_crop_spot(self):
         """Pick a random (x, y) in the crop zone that doesn't cluster with existing crops.
@@ -429,6 +458,23 @@ class GameEngine:
             if not too_close:
                 return (x, y)
         return None
+
+    def _find_hard_crop_spot(self):
+        """Pick a crop spot in the edge zones far from HOME_X (hard to reach)."""
+        existing = [(c["x"], c["y"]) for c in self.state["world"]["crops"]]
+        for _ in range(20):
+            if random.random() < 0.5:
+                x = random.randint(CROP_X_MIN, CROP_HARD_ZONE_W - 1)
+            else:
+                x = random.randint(CROP_X_MAX - CROP_HARD_ZONE_W + 1, CROP_X_MAX)
+            y = random.randint(CROP_Y_MIN, CROP_Y_MAX)
+            too_close = any(
+                abs(x - ex) < CROP_MIN_SPACING and abs(y - ey) < CROP_MIN_SPACING
+                for ex, ey in existing
+            )
+            if not too_close:
+                return (x, y)
+        return self._find_crop_spot()  # fallback to anywhere
 
     def _decay_food(self):
         """Food decreases over time (characters eating)."""
