@@ -227,12 +227,12 @@ def fetch_weather_pirate(config):
 
 GAME_STATE_FILE = SCRIPT_DIR / "game_state.json"
 
-# Pixel zones on the 64x32 display
-# Bottom half (y=17-31) is the game area; text/numbers are obstacles
-ZONE_CROPS = (0, 19)   # Col1: crop fields (open at night)
-ZONE_HOME = (20, 43)   # Col2: safe zone (house area)
-ZONE_WILD = (44, 63)   # Col3: wilderness
-HOME_X = 30            # House door x-position
+# Game area: ONLY col1 (x=0-19) bottom half. Col2/col3 bottom have info displays.
+# Characters, threats, crops, pets must all stay within x=0-19 to avoid overlapping
+# text, numbers, and battery bar readouts.
+GAME_X_MIN = 0         # Left edge
+GAME_X_MAX = 19        # Right edge (col1 boundary)
+HOME_X = 10            # "Home" position in the game area (center of col1)
 POND_X = 4             # Fishing pond x-position
 POND_Y = 25            # Fishing pond y-position
 POWER_ZERO_W = 50      # Below this, solar panel text not shown
@@ -294,7 +294,7 @@ class GameEngine:
                 "x": HOME_X, "state": "idle", "target_x": HOME_X,
                 "alive": True, "trait": t["trait"], "revive_timer": 0,
             })
-        pets = [{"id": t["id"], "x": HOME_X + 2 + i * 2, "alive": True} for i, t in enumerate(PET_TEMPLATES)]
+        pets = [{"id": t["id"], "x": HOME_X, "alive": True, "deployed": False} for i, t in enumerate(PET_TEMPLATES)]
         return {
             "version": 1, "tick": 0, "day_number": 1,
             "world": {
@@ -348,20 +348,26 @@ class GameEngine:
         for char in alive_chars:
             self._character_decide(char, is_night, battery_pct, weather_icon)
 
-        # Phase 4: Combat
+        # Phase 4: Pet deployment (only one out at a time)
+        self._deploy_pets()
+
+        # Phase 5: Combat
         self._resolve_combat()
 
-        # Phase 5: Movement
+        # Phase 6: Pet abilities (dog barks at yeti, cat scratches alien)
+        self._pet_abilities()
+
+        # Phase 7: Movement
         self._move_characters()
         self._move_pets()
 
-        # Phase 6: Revival
+        # Phase 8: Revival
         self._check_revivals(battery_pct)
 
-        # Phase 7: Starvation
+        # Phase 9: Starvation
         self._check_starvation()
 
-        # Phase 8: Prosperity
+        # Phase 10: Prosperity
         self._update_prosperity(battery_pct, solar_power)
 
         self.state["tick"] += 1
@@ -414,33 +420,33 @@ class GameEngine:
             base_chance = 33
 
         if random.randint(1, 100) <= base_chance:
-            # Pick threat type
+            # Pick threat type — all spawn at col1 edges
             roll = random.randint(1, 100)
             if roll <= 40:
-                # Yeti from the right (wilderness)
-                threat = {"type": "yeti", "x": 62, "hp": 4, "state": "approaching", "speed": 2, "damage": 2, "dir": -1}
+                # Yeti from the right edge of col1
+                threat = {"type": "yeti", "x": GAME_X_MAX, "hp": 4, "state": "approaching", "speed": 1, "damage": 2, "dir": -1}
             elif roll <= 70:
-                # Alien (little green man) from the left (crop fields)
-                threat = {"type": "alien", "x": 0, "hp": 2, "state": "approaching", "speed": 2, "damage": 1, "dir": 1}
+                # Alien (little green man) from the left edge
+                threat = {"type": "alien", "x": GAME_X_MIN, "hp": 2, "state": "approaching", "speed": 1, "damage": 1, "dir": 1}
             else:
-                # Raider from the right
-                threat = {"type": "raider", "x": 62, "hp": 3, "state": "approaching", "speed": 2, "damage": 1, "dir": -1}
+                # Raider from the right edge
+                threat = {"type": "raider", "x": GAME_X_MAX, "hp": 3, "state": "approaching", "speed": 1, "damage": 1, "dir": -1}
             self.state["threats"].append(threat)
             self.state["world"]["threat_cooldown"] = 8
             self.state["world"]["last_event"] = f"{threat['type']}_spawn"
             logger.info("Game: %s spawned at x=%d", threat["type"], threat["x"])
 
     def _move_threats(self):
-        """Move threats toward house. dir=1 from left, dir=-1 from right."""
+        """Move threats toward house within col1 bounds."""
         for threat in self.state["threats"]:
             if threat["state"] == "approaching":
                 direction = threat.get("dir", -1)
                 if direction > 0:
-                    # From left, moving right toward house
-                    threat["x"] = min(HOME_X + 5, threat["x"] + threat["speed"])
+                    threat["x"] = min(HOME_X + 3, threat["x"] + threat["speed"])
                 else:
-                    # From right, moving left toward house
-                    threat["x"] = max(HOME_X - 5, threat["x"] - threat["speed"])
+                    threat["x"] = max(HOME_X - 3, threat["x"] - threat["speed"])
+                # Clamp to game area
+                threat["x"] = max(GAME_X_MIN, min(GAME_X_MAX, threat["x"]))
 
     # --- Phase 3: Character AI ---
 
@@ -488,11 +494,15 @@ class GameEngine:
                 bonus = 5 if char["trait"] == "cautious" else 0
                 total = base_yield + distance_bonus + bonus
                 self.state["world"]["food"] = min(MAX_FOOD, self.state["world"]["food"] + total)
-                self.state["world"]["crops"].remove(crop)
+                # Auto-replant: reset to seed stage, new growth rate
+                crop["stage"] = 0
+                crop["planted_tick"] = self.state["tick"]
+                crop["stage_tick"] = self.state["tick"]
+                crop["growth_rate"] = round(random.uniform(0.7, 1.3), 2)
                 char["state"] = "idle"
                 char["target_x"] = HOME_X
                 self.state["world"]["last_event"] = "harvest"
-                logger.info("Game: %s harvested crop at x=%d, yield=%d, food=%d",
+                logger.info("Game: %s harvested crop at x=%d, yield=%d, food=%d (auto-replanted)",
                             char["id"], crop["x"], total, self.state["world"]["food"])
             else:
                 char["state"] = "farming"
@@ -545,15 +555,15 @@ class GameEngine:
                 self.state["world"]["food"] = max(0, self.state["world"]["food"] - 2)
             return
 
-        # 8. PATROL — default daytime
+        # 8. PATROL — default daytime, stay within col1 game area
         if not is_night:
             char["state"] = "patrol"
             if char["trait"] == "brave":
-                char["target_x"] = random.randint(40, 55)
+                char["target_x"] = random.randint(14, GAME_X_MAX)
             elif char["trait"] == "cautious":
-                char["target_x"] = random.randint(10, 25)
+                char["target_x"] = random.randint(GAME_X_MIN, 8)
             else:
-                char["target_x"] = random.randint(25, 45)
+                char["target_x"] = random.randint(5, 15)
             return
 
         # 9. SLEEP — night, safe, nothing to do
@@ -626,28 +636,102 @@ class GameEngine:
                 char["x"] = min(target, char["x"] + speed)
             else:
                 char["x"] = max(target, char["x"] - speed)
+            # Clamp to game area
+            char["x"] = max(GAME_X_MIN, min(GAME_X_MAX, char["x"]))
+
+    def _deploy_pets(self):
+        """Only one pet can be deployed at a time. Choose based on threats."""
+        dog = next((p for p in self.state["pets"] if p["id"] == "dog"), None)
+        cat = next((p for p in self.state["pets"] if p["id"] == "cat"), None)
+        if not dog or not cat:
+            return
+
+        has_yeti = any(t["type"] == "yeti" for t in self.state["threats"])
+        has_alien = any(t["type"] == "alien" for t in self.state["threats"])
+
+        if has_yeti and not has_alien:
+            dog["deployed"] = True
+            cat["deployed"] = False
+        elif has_alien and not has_yeti:
+            dog["deployed"] = False
+            cat["deployed"] = True
+        elif has_yeti and has_alien:
+            # Pick based on which threat is closer to house
+            yeti = min((t for t in self.state["threats"] if t["type"] == "yeti"),
+                       key=lambda t: abs(t["x"] - HOME_X))
+            alien = min((t for t in self.state["threats"] if t["type"] == "alien"),
+                        key=lambda t: abs(t["x"] - HOME_X))
+            if abs(yeti["x"] - HOME_X) < abs(alien["x"] - HOME_X):
+                dog["deployed"] = True
+                cat["deployed"] = False
+            else:
+                dog["deployed"] = False
+                cat["deployed"] = True
+        else:
+            # No threats — both stay home
+            dog["deployed"] = False
+            cat["deployed"] = False
+
+        # Recall undeployed pet to home
+        if not dog["deployed"]:
+            dog["x"] = HOME_X
+        if not cat["deployed"]:
+            cat["x"] = HOME_X
+
+    def _pet_abilities(self):
+        """Dog barks at yetis (scare off), cat scratches aliens (damage)."""
+        for pet in self.state["pets"]:
+            if not pet.get("deployed", False):
+                continue
+
+            if pet["id"] == "dog":
+                # Dog barks at nearby yetis — chance to scare them off
+                for threat in list(self.state["threats"]):
+                    if threat["type"] == "yeti" and abs(pet["x"] - threat["x"]) < 8:
+                        if random.random() < 0.25:
+                            # Scare yeti — push back 5px toward edge
+                            direction = threat.get("dir", -1)
+                            retreat = 5 * (-direction)  # push back the way it came
+                            threat["x"] += retreat
+                            # If pushed off screen, remove it
+                            if threat["x"] > 63 or threat["x"] < 0:
+                                self.state["threats"].remove(threat)
+                                self.state["world"]["last_event"] = "yeti_scared"
+                                logger.info("Game: Dog scared off yeti!")
+                            else:
+                                logger.info("Game: Dog barked at yeti! Pushed to x=%d", threat["x"])
+
+            elif pet["id"] == "cat":
+                # Cat scratches nearby aliens — deals 1 damage per tick
+                for threat in list(self.state["threats"]):
+                    if threat["type"] == "alien" and abs(pet["x"] - threat["x"]) < 6:
+                        threat["hp"] -= 1
+                        if threat["hp"] <= 0:
+                            self.state["threats"].remove(threat)
+                            self.state["world"]["food"] = min(MAX_FOOD, self.state["world"]["food"] + 10)
+                            self.state["world"]["last_event"] = "alien_scratched"
+                            logger.info("Game: Cat killed alien!")
+                        else:
+                            logger.info("Game: Cat scratched alien! HP=%d", threat["hp"])
 
     def _move_pets(self):
-        """Move pets to follow nearest alive character."""
+        """Move deployed pet to follow nearest alive character. Undeployed pets stay home."""
         alive_chars = [c for c in self.state["characters"] if c["alive"]]
         if not alive_chars:
             return
         for pet in self.state["pets"]:
-            if not pet["alive"]:
+            if not pet.get("deployed", False):
                 continue
-            # Dog follows nearest character
+            # Follow nearest character
             nearest = min(alive_chars, key=lambda c: abs(c["x"] - pet["x"]))
-            target = nearest["x"] + (2 if pet["id"] == "dog" else -2)
+            offset = 2 if pet["id"] == "dog" else -2
+            target = nearest["x"] + offset
             if abs(pet["x"] - target) > 1:
                 if target > pet["x"]:
                     pet["x"] = min(target, pet["x"] + 2)
                 else:
                     pet["x"] = max(target, pet["x"] - 2)
-            # Cat distraction
-            if pet["id"] == "cat":
-                for threat in self.state["threats"]:
-                    if abs(pet["x"] - threat["x"]) < 8 and random.random() < 0.30:
-                        threat["x"] += 1  # push threat back 1px
+            pet["x"] = max(GAME_X_MIN, min(GAME_X_MAX, pet["x"]))
 
     # --- Phase 6: Revival ---
 
@@ -735,8 +819,8 @@ class GameEngine:
             chars.append(f"{c['id']}:{c['x']}:{c['target_x']}:{c['state']}:{1 if c['alive'] else 0}:{speed}")
         params["gc"] = "|".join(chars)
 
-        # Pets: "id:x:alive"
-        pets = [f"{p['id']}:{p['x']}:{1 if p['alive'] else 0}" for p in self.state["pets"]]
+        # Pets: "id:x:alive:deployed"
+        pets = [f"{p['id']}:{p['x']}:{1 if p['alive'] else 0}:{1 if p.get('deployed', False) else 0}" for p in self.state["pets"]]
         params["gp"] = "|".join(pets)
 
         # Threats: "type:x:state:dir"
