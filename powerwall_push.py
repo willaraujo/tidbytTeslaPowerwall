@@ -477,11 +477,10 @@ class GameEngine:
         # 0. RETURNING — must finish walking home before taking new tasks
         #    Only combat/flee can interrupt a return trip
         if char["state"] == "returning":
-            if abs(char["x"] - my_home) <= 1:
-                # Arrived home — now idle
+            if abs(char["x"] - my_home) <= 2:
+                # Arrived home (or close enough if blocked by others) — now idle
                 char["state"] = "idle"
-                char["x"] = my_home
-                char["target_x"] = my_home
+                char["target_x"] = char["x"]
             elif threat_dist < 4 and char["hp"] > 2:
                 pass  # fall through to flee/fight checks below
             else:
@@ -646,8 +645,22 @@ class GameEngine:
 
     # --- Phase 5: Movement ---
 
+    def _get_occupied_positions(self, exclude_id):
+        """Return set of x positions occupied by other alive characters and deployed pets."""
+        occupied = set()
+        MIN_SPACING = 2  # entities need at least 2px gap
+        for c in self.state["characters"]:
+            if c["alive"] and c["id"] != exclude_id:
+                for dx in range(-MIN_SPACING + 1, MIN_SPACING):
+                    occupied.add(c["x"] + dx)
+        for p in self.state["pets"]:
+            if p.get("deployed", False):
+                for dx in range(-MIN_SPACING + 1, MIN_SPACING):
+                    occupied.add(p["x"] + dx)
+        return occupied
+
     def _move_characters(self):
-        """Move characters toward their target_x."""
+        """Move characters toward their target_x, avoiding overlap with others."""
         for char in self.state["characters"]:
             if not char["alive"] or char["state"] == "idle" or char["state"] == "fishing":
                 continue
@@ -666,12 +679,19 @@ class GameEngine:
             else:
                 speed = 2 if hp_ratio > 0.75 else 1
 
-            if target > char["x"]:
-                char["x"] = min(target, char["x"] + speed)
-            else:
-                char["x"] = max(target, char["x"] - speed)
-            # Clamp to game area
-            char["x"] = max(GAME_X_MIN, min(GAME_X_MAX, char["x"]))
+            occupied = self._get_occupied_positions(char["id"])
+
+            # Try full speed first, then step down to 1, then 0 (blocked)
+            moved = False
+            direction = 1 if target > char["x"] else -1
+            for step in range(speed, 0, -1):
+                new_x = char["x"] + step * direction
+                new_x = max(GAME_X_MIN, min(GAME_X_MAX, new_x))
+                if new_x not in occupied:
+                    char["x"] = new_x
+                    moved = True
+                    break
+            # If completely blocked, stay put (don't clip through)
 
     def _deploy_pets(self):
         """Only one pet can be deployed at a time. Choose based on threats."""
@@ -749,22 +769,41 @@ class GameEngine:
                             logger.info("Game: Cat scratched alien! HP=%d", threat["hp"])
 
     def _move_pets(self):
-        """Move deployed pet to follow nearest alive character. Undeployed pets stay home."""
+        """Move deployed pet to follow nearest alive character, avoiding overlap."""
         alive_chars = [c for c in self.state["characters"] if c["alive"]]
         if not alive_chars:
             return
+        # Collect positions of all characters and other pets
+        char_positions = set()
+        MIN_SPACING = 2
+        for c in self.state["characters"]:
+            if c["alive"]:
+                for dx in range(-MIN_SPACING + 1, MIN_SPACING):
+                    char_positions.add(c["x"] + dx)
+
         for pet in self.state["pets"]:
             if not pet.get("deployed", False):
                 continue
-            # Follow nearest character
+            # Follow nearest character with offset
             nearest = min(alive_chars, key=lambda c: abs(c["x"] - pet["x"]))
             offset = 2 if pet["id"] == "dog" else -2
             target = nearest["x"] + offset
+
+            # Collect positions of other deployed pets
+            occupied = set(char_positions)
+            for other_pet in self.state["pets"]:
+                if other_pet["id"] != pet["id"] and other_pet.get("deployed", False):
+                    for dx in range(-MIN_SPACING + 1, MIN_SPACING):
+                        occupied.add(other_pet["x"] + dx)
+
             if abs(pet["x"] - target) > 1:
-                if target > pet["x"]:
-                    pet["x"] = min(target, pet["x"] + 2)
-                else:
-                    pet["x"] = max(target, pet["x"] - 2)
+                direction = 1 if target > pet["x"] else -1
+                for step in (2, 1):
+                    new_x = pet["x"] + step * direction
+                    new_x = max(GAME_X_MIN, min(GAME_X_MAX, new_x))
+                    if new_x not in occupied:
+                        pet["x"] = new_x
+                        break
             pet["x"] = max(GAME_X_MIN, min(GAME_X_MAX, pet["x"]))
 
     # --- Phase 6: Revival ---
