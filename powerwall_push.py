@@ -1066,9 +1066,11 @@ def run_once(config):
     session.close()
 
     # Run game engine ticks (multiple per push for visible progress)
-    engine = _get_game_engine()
-    for i in range(TICKS_PER_PUSH):
-        game_params = engine.tick(sensor_data, weather_data, save=(i == TICKS_PER_PUSH - 1))
+    game_params = None
+    if config.get("game", {}).get("enabled", True):
+        engine = _get_game_engine()
+        for i in range(TICKS_PER_PUSH):
+            game_params = engine.tick(sensor_data, weather_data, save=(i == TICKS_PER_PUSH - 1))
 
     # Render via Pixlet
     webp_path = render_pixlet(sensor_data, weather_data, config, game_params)
@@ -1156,9 +1158,11 @@ def _do_render_push(cache, config):
     logger.info("WS render: sensors=%s weather=%s", sensor_data, weather_data)
 
     # Run game engine ticks (multiple per push for visible progress)
-    engine = _get_game_engine()
-    for i in range(TICKS_PER_PUSH):
-        game_params = engine.tick(sensor_data, weather_data, save=(i == TICKS_PER_PUSH - 1))
+    game_params = None
+    if config.get("game", {}).get("enabled", True):
+        engine = _get_game_engine()
+        for i in range(TICKS_PER_PUSH):
+            game_params = engine.tick(sensor_data, weather_data, save=(i == TICKS_PER_PUSH - 1))
 
     webp_path = render_pixlet(sensor_data, weather_data, config, game_params)
     if webp_path is None:

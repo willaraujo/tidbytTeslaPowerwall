@@ -29,6 +29,11 @@ tidbyt:
 seasonal:
   override: ""
 
+## Game engine: persistent survival simulation (characters, pets, crops, threats)
+## Set enabled to false to disable — seed-based scenes and holidays still render
+game:
+  enabled: true
+
 ## Update mode: "websocket" (real-time via HA WebSocket) or "polling" (REST every N seconds)
 schedule:
   mode: "websocket"
